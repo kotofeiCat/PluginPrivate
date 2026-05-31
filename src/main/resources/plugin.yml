@@ -1,0 +1,29 @@
+name: serverSystem
+version: '${version}'
+
+main: ru.politaboba.serverSystem.ServerSystem
+api-version: '1.21'
+load: POSTWORLD
+commands:
+  faction:
+    description: Основная команда фракций сервера
+    aliases: [f]
+  bounty:
+    description: Доска объявлений охоты за головами
+    aliases: [ b ]
+  contract:
+    description: Управление бумажными контрактами и архив пактов
+    aliases: [ c ]
+  handcuffs:
+    description: Получить предмет РП-Кандалов
+    permission: serversystem.admin
+  g:
+    description: Отправить сообщение в глобальный чат сервера
+    aliases: [ global ]
+  msg:
+    description: Отправить личное приватное сообщение игроку
+    aliases: [ w, tell, pm ]
+  generatecastle:
+    description: Генерирует тронный зал и спавнит босса.
+    permission: dungeon.admin
+    usage: /<command>
