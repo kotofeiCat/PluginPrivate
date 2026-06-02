@@ -368,6 +368,8 @@ public class DungeonSession {
         return false;
     }
 
+    //крутой говно код
+
     private void generateLootTables() {
         List<Map<?, ?>> chestOffsets = plugin.getConfig().getMapList("dungeon.loot-chests");
         Random random = new Random();
