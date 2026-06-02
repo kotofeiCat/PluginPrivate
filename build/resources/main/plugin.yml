@@ -27,3 +27,12 @@ commands:
     description: Генерирует тронный зал и спавнит босса.
     permission: dungeon.admin
     usage: /<command>
+  dungeonorigin:
+    description: Установить точку отсчета (0,0,0) для настройки относительных координат данжа.
+    permission: dungeon.admin
+    usage: /<command>
+  dungeon:
+    description: "Управление входом и готовностью в лобби кастомного данжа"
+    usage: /<command> [ready/start]
+
+depend: [WorldEdit]

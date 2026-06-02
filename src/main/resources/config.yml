@@ -4,3 +4,41 @@ database:
   database: "s527801_factions"
   username: "u527801_Eq0muyNrlZ"
   password: "9@bUOfw.+gug5K=bozD4SS6."
+
+dungeon:
+  structure-name: "pobornik_castle"
+
+  # Координаты из прошлых шагов
+  lobby-zone:
+    min: {x: -3, y: 0, z: 6}
+    max: {x: 4, y: 0, z: 9}
+  stage1-spawn: {x: 0, y: 0, z: 13}
+  wave-spawns:
+    - {x: 0, y: 0, z: 13}
+  doors-stage1:
+    - {x: 2, y: 2, z: 46}
+    - {x: 1, y: 2, z: 46}
+  loot-chests:
+    - {x: -6, y: 1, z: 42}
+    - {x: -12, y: 3, z: 42}
+    - {x: 16, y: 2, z: 46}
+    - {x: 6, y: 1, z: 40}
+    - {x: 17, y: 3, z: 56}
+
+  # ТВОЯ НОВАЯ ТОЧКА СПАВНА БОССА (Красный ковёр):
+  boss-spawn:
+    x: -4
+    y: 7
+    z: 51
+
+  wave-settings:
+    wave1:
+      ZOMBIE: 5
+      SKELETON: 2
+    wave2:
+      ZOMBIE: 4
+      VINDICATOR: 3
+      SKELETON: 4
+    wave3:
+      VINDICATOR: 5
+      WITHER_SKELETON: 3

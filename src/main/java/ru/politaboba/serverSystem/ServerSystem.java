@@ -9,10 +9,8 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scoreboard.Scoreboard;
 import org.bukkit.scoreboard.Team;
-import ru.politaboba.serverSystem.Dangeon.PobornikCastle.ArchVindicatorBoss;
-import ru.politaboba.serverSystem.Dangeon.PobornikCastle.DungeonWorldGenerator;
-import ru.politaboba.serverSystem.Dangeon.PobornikCastle.ItemArtifactListener;
-import ru.politaboba.serverSystem.Dangeon.PobornikCastle.TestCastleCommand;
+import ru.politaboba.serverSystem.Dangeon.DungeonDevTool;
+import ru.politaboba.serverSystem.Dangeon.PobornikCastle.*;
 import ru.politaboba.serverSystem.bounty.BountyCommand;
 import ru.politaboba.serverSystem.bounty.BountyListener;
 import ru.politaboba.serverSystem.bounty.BountyOrder;
@@ -76,17 +74,39 @@ public final class ServerSystem extends JavaPlugin {
     @Override
     public void onEnable() {
 
-        // Регистрация листенера артефакта
+// Регистрация листенера артефакта (уже было у тебя)
         getServer().getPluginManager().registerEvents(new ItemArtifactListener(), this);
 
-        // Регистрация класса босса (внутри него регистрируются его ивенты)
+        // ==================== МОДУЛЬ КАСТОМНОГО ДАНЖА ====================
+
+        // 1. Инициализируем механику кастомного босса
         ArchVindicatorBoss bossMechanics = new ArchVindicatorBoss(this);
 
-        // Команда ручного спавна для админов
-        this.getCommand("generatecastle").setExecutor(new TestCastleCommand(this, bossMechanics));
+        // 2. Инициализируем менеджер сессий данжей (управляет NBT-структурами и логикой)
+        DungeonManager dungeonManager = new DungeonManager(this, bossMechanics);
 
-        // СЮДА ДОБАВЛЯЕМ: Автоматический алгоритм генерации данжей при прогрузке мира!
-        getServer().getPluginManager().registerEvents(new DungeonWorldGenerator(this, bossMechanics), this);
+        // 3. Регистрируем обновленную команду ручного спавна замка для админов
+        if (this.getCommand("generatecastle") != null) {
+            this.getCommand("generatecastle").setExecutor(new TestCastleCommand(dungeonManager));
+        }
+
+        // 4. Регистрируем главный игровой листенер данжа (кнопки старта, ключи, волны мобов)
+        DungeonListener dungeonListener = new DungeonListener(this, dungeonManager);
+        getServer().getPluginManager().registerEvents(dungeonListener, this);
+
+        // 5. Инициализируем и регистрируем палочку-инструмент разработчика (Dev Tool)
+        DungeonDevTool devTool = new DungeonDevTool();
+        getServer().getPluginManager().registerEvents(devTool, this); // Регистрируем как листенер кликов
+
+        if (this.getCommand("dungeonorigin") != null) {
+            this.getCommand("dungeonorigin").setExecutor(devTool); // Регистрируем команду установки точки отсчета
+        }
+
+        if (this.getCommand("dungeon") != null) {
+            this.getCommand("dungeon").setExecutor(new DungeonPlayerCommand(dungeonManager));
+        }
+
+        //--------------------------
 
         // Создаем config.yml с дефолтными настройками, если его не было
         saveDefaultConfig();
