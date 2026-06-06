@@ -22,6 +22,7 @@ import ru.politaboba.serverSystem.contract.ContractTabCompleter;
 import ru.politaboba.serverSystem.faction.command.FactionCommand;
 import ru.politaboba.serverSystem.faction.command.FactionTabCompleter;
 import ru.politaboba.serverSystem.faction.command.GlobalChatCommand;
+import ru.politaboba.serverSystem.faction.command.MsgTabCompleter;
 import ru.politaboba.serverSystem.faction.listener.FactionChatListener;
 import ru.politaboba.serverSystem.faction.listener.FactionListener;
 import ru.politaboba.serverSystem.faction.manager.ChatManager;
@@ -74,7 +75,7 @@ public final class ServerSystem extends JavaPlugin {
     @Override
     public void onEnable() {
 
-// Регистрация листенера артефакта (уже было у тебя)
+        // Регистрация листенера артефакта (уже было у тебя)
         getServer().getPluginManager().registerEvents(new ItemArtifactListener(), this);
 
         // ==================== МОДУЛЬ КАСТОМНОГО ДАНЖА ====================
@@ -187,6 +188,14 @@ public final class ServerSystem extends JavaPlugin {
         registerSmokeBombRecipe();
         registerHalberdRecipe();
         registerMercenaryTemplateRecipe();
+
+        // Регистрация автодополнения для личных сообщений
+        if (getCommand("msg") != null) {
+            getCommand("msg").setTabCompleter(new MsgTabCompleter(this));
+        }
+        if (getCommand("w") != null) {
+            getCommand("w").setTabCompleter(new MsgTabCompleter(this));
+        }
 
         getLogger().info("=======================================");
         getLogger().info(" [ServerSystem] Все RP модули успешно запущены!");

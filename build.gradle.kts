@@ -7,12 +7,17 @@ repositories {
     mavenCentral()
     maven("https://repo.papermc.io/repository/maven-public/")
     maven("https://maven.enginehub.org/repo/")
+    maven("https://repo.extendedclip.com/content/repositories/placeholderapi/")
 }
 
 dependencies {
     compileOnly("io.papermc.paper:paper-api:26.1.2.build.+")
     compileOnly("com.sk89q.worldedit:worldedit-bukkit:7.3.0")
+
+    compileOnly("me.clip:placeholderapi:2.11.6")
 }
+
+
 
 java {
     toolchain.languageVersion = JavaLanguageVersion.of(26)

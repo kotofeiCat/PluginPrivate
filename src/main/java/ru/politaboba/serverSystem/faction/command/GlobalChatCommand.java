@@ -1,5 +1,6 @@
 package ru.politaboba.serverSystem.faction.command;
 
+import me.clip.placeholderapi.PlaceholderAPI; // Импортируем PlaceholderAPI
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.command.Command;
@@ -14,10 +15,13 @@ public class GlobalChatCommand implements CommandExecutor {
 
     private final ServerSystem plugin;
     private final ChatManager chatManager;
+    private final boolean hasPlaceholderAPI;
 
     public GlobalChatCommand(ServerSystem plugin, ChatManager chatManager) {
         this.plugin = plugin;
         this.chatManager = chatManager;
+        // Проверяем, установлен ли PlaceholderAPI на сервере, чтобы избежать ошибок
+        this.hasPlaceholderAPI = Bukkit.getPluginManager().isPluginEnabled("PlaceholderAPI");
     }
 
     @Override
@@ -34,14 +38,27 @@ public class GlobalChatCommand implements CommandExecutor {
             String message = String.join(" ", args);
             String factionName = plugin.getPlayerFactionMap().get(player.getUniqueId());
 
-            String prefix = "§8[Скиталец] ";
+            // 1. Получаем префикс из LuckPerms через PlaceholderAPI
+            String lpPrefix = "";
+            if (hasPlaceholderAPI) {
+                // Плейсхолдер %luckperms_prefix% вернет ярко-розовый "[Спонсор]" со всеми цветами
+                lpPrefix = PlaceholderAPI.setPlaceholders(player, "%luckperms_prefix%");
+            }
+
+            // 2. Формируем префикс фракции (или Скитальца)
+            String factionPrefix = "§8[Скиталец] ";
             if (factionName != null) {
                 Faction faction = plugin.getFactions().get(factionName);
                 ChatColor color = (faction != null) ? faction.getFactionColor() : ChatColor.GOLD;
-                prefix = ChatColor.DARK_GRAY + "[" + color + factionName + ChatColor.DARK_GRAY + "] " + color;
+                factionPrefix = ChatColor.DARK_GRAY + "[" + color + factionName + ChatColor.DARK_GRAY + "] " + color;
             }
 
-            Bukkit.broadcastMessage("§e📢 [ГЛОБАЛ] " + prefix + player.getName() + "§7: §f" + message);
+            // 3. Выводим в чат: [ГЛОБАЛ] [Спонсор] [Фракция] Ник: сообщение
+            // Используем ChatColor.translateAlternateColorCodes для поддержки HEX-цветов в сообщении
+            String finalMessage = ChatColor.translateAlternateColorCodes('&',
+                    "§e📢 [ГЛОБАЛ] " + lpPrefix + factionPrefix + player.getName() + "§7: §f" + message);
+
+            Bukkit.broadcastMessage(finalMessage);
             return true;
         }
 

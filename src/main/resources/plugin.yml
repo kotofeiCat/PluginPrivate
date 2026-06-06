@@ -36,3 +36,4 @@ commands:
     usage: /<command> [ready/start]
 
 depend: [WorldEdit]
+softdepend: [PlaceholderAPI]
