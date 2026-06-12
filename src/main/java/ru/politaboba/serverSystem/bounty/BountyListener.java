@@ -26,30 +26,27 @@ public class BountyListener implements Listener {
 
     @EventHandler
     public void onInventoryClick(InventoryClickEvent event) {
-        if (!event.getView().getTitle().equals("§0Доска Заказов")) return;
-        event.setCancelled(true); // Запрещаем вытаскивать предметы
+        // Защита инвентаря на основе кастомного Holder
+        if (!(event.getInventory().getHolder() instanceof BountyCommand.BountyBoardHolder)) return;
+        event.setCancelled(true);
 
         Player player = (Player) event.getWhoClicked();
         ItemStack clickedItem = event.getCurrentItem();
         if (clickedItem == null || clickedItem.getType() == Material.AIR) return;
 
-        // ИНТЕРАКТИВНЫЙ КЛИК ПО ТАБЛИЧКЕ (Автозаполнение в чат)
         if (clickedItem.getType() == Material.OAK_SIGN) {
-            player.closeInventory(); // Закрываем GUI, чтобы открыть чат
+            player.closeInventory();
 
             player.sendMessage(" ");
             player.sendMessage("§c§l[Охота за Головами] §7Чтобы быстро оформить заказ:");
 
-            // Создаем интерактивное текстовое сообщение
             net.md_5.bungee.api.chat.TextComponent message = new net.md_5.bungee.api.chat.TextComponent("§6§l👉 НАЖМИ СЮДА, ЧТОБЫ НАЧАТЬ ВВОД 👈");
 
-            // Настраиваем действие при клике — SUGGEST_COMMAND
             message.setClickEvent(new net.md_5.bungee.api.chat.ClickEvent(
                     net.md_5.bungee.api.chat.ClickEvent.Action.SUGGEST_COMMAND,
                     "/bounty target "
             ));
 
-            // Добавляем подсказку при наведении мыши
             message.setHoverEvent(new net.md_5.bungee.api.chat.HoverEvent(
                     net.md_5.bungee.api.chat.HoverEvent.Action.SHOW_TEXT,
                     new net.md_5.bungee.api.chat.ComponentBuilder("§aКликни, и команда сама появится в твоем чате!").create()
@@ -60,8 +57,7 @@ public class BountyListener implements Listener {
             return;
         }
 
-        // Если кликнули по кнопке "Сдать контракт"
-        if (clickedItem.getType() == Material.CHEST && clickedItem.getItemMeta().getDisplayName().equals("§aСдать контракт")) {
+        if (clickedItem.getType() == Material.CHEST && clickedItem.hasItemMeta() && clickedItem.getItemMeta().getDisplayName().equals("§aСдать контракт")) {
             ItemStack itemInHand = player.getInventory().getItemInMainHand();
 
             if (itemInHand.getType() != Material.PLAYER_HEAD) {
@@ -75,15 +71,15 @@ public class BountyListener implements Listener {
             UUID victimUUID = headMeta.getOwningPlayer().getUniqueId();
 
             if (plugin.getBountyOrders().containsKey(victimUUID)) {
-                BountyOrder order = plugin.getBountyOrders().remove(victimUUID); // Удаляем контракт из системы
+                BountyOrder order = plugin.getBountyOrders().remove(victimUUID);
 
-                // Накатываем принудительное сохранение файлов на диск, чтобы очистить выполненный заказ
-                plugin.getFactionDataManager().saveAll();
+                // РЕШЕНИЕ БАГА: Выносим дисковые операции ввода-вывода (I/O) в асинхронный поток для сохранения стабильного TPS
+                Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+                    plugin.getFactionDataManager().saveAll();
+                });
 
-                // Удаляем голову из руки наемника
                 itemInHand.setAmount(itemInHand.getAmount() - 1);
 
-                // Выдаем награду алмазами
                 ItemStack diamonds = new ItemStack(Material.DIAMOND, order.getRewardAmount());
                 player.getInventory().addItem(diamonds);
 
@@ -95,36 +91,28 @@ public class BountyListener implements Listener {
         }
     }
 
-    // Ставим HIGHEST приоритет, чтобы наш плагин гарантированно переписывал keepInventory от других плагинов авторизации или сохранения данных
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onPlayerDeath(PlayerDeathEvent event) {
         Player victim = event.getEntity();
         UUID victimUUID = victim.getUniqueId();
 
-        // Проверяем, есть ли на игрока активный заказ
         if (plugin.getBountyOrders().containsKey(victimUUID)) {
             BountyOrder order = plugin.getBountyOrders().get(victimUUID);
 
-            // =======================================================
-            // 🛑 ХАРДКОРНАЯ МЕХАНИКА: ОТКЛЮЧЕНИЕ СОХРАНЕНИЯ ИНВЕНТАРЯ
-            // =======================================================
             if (event.getKeepInventory()) {
-                event.setKeepInventory(false); // Принудительно заставляем вещи выпасть на землю
-                event.getDrops().clear(); // Очищаем возможные баги дублирования дропа
+                event.setKeepInventory(false);
+                event.getDrops().clear();
 
-                // Вручную высыпаем всё содержимое инвентаря игрока на место его смерти
                 for (ItemStack item : victim.getInventory().getContents()) {
                     if (item != null && item.getType() != Material.AIR) {
                         event.getDrops().add(item);
                     }
                 }
 
-                // Дополнительно сбрасываем уровень и опыт на землю
                 event.setKeepLevel(false);
-                event.setDroppedExp(Math.min(victim.getTotalExperience(), 100)); // Ограничение ванильного дропа опыта
+                event.setDroppedExp(Math.min(victim.getTotalExperience(), 100));
             }
 
-            // Создаем кастомную РП-голову жертвы
             ItemStack victimHead = new ItemStack(Material.PLAYER_HEAD);
             SkullMeta headMeta = (SkullMeta) victimHead.getItemMeta();
 
@@ -138,16 +126,13 @@ public class BountyListener implements Listener {
                 victimHead.setItemMeta(headMeta);
             }
 
-            // Добавляем голову к общему выпавшему луту
             event.getDrops().add(victimHead);
 
-            // Эффекты и глобальное оповещение о ликвидации цели
             if (killer != null) {
                 killer.sendMessage("§c§l[Охота за Головами] §aВы ликвидировали цель! Заберите её вещи и голову для сдачи в §6/bounty§a.");
                 killer.playSound(killer.getLocation(), Sound.ENTITY_LIGHTNING_BOLT_THUNDER, 0.7f, 1.2f);
             }
 
-            // Красивый глобальный некpолог в чат сервера
             Bukkit.broadcastMessage(" ");
             Bukkit.broadcastMessage("§4§l☠ [ЛИКВИДАЦИЯ] ☠");
             Bukkit.broadcastMessage("§cЗаказ на голову §e" + victim.getName() + " §cбыл успешно исполнен!");

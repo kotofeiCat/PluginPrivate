@@ -1,5 +1,5 @@
 name: serverSystem
-version: '1.0-SNAPSHOT'
+version: '1.0.1'
 
 main: ru.politaboba.serverSystem.ServerSystem
 api-version: '1.21'
@@ -34,6 +34,13 @@ commands:
   dungeon:
     description: "Управление входом и готовностью в лобби кастомного данжа"
     usage: /<command> [ready/start]
+  case:
+    description: Открыть донат-аппарат с кейсами
+    aliases: [ cases, donate ]
+  rpgive:
+    description: Выдать кастомное RP снаряжение или оружие
+    permission: serversystem.admin.giveequipment
+    usage: /rpgive <id_предмета> [игрок]
 
 depend: [WorldEdit]
 softdepend: [PlaceholderAPI]

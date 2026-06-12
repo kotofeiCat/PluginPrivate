@@ -6,8 +6,10 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.BookMeta;
 import ru.politaboba.serverSystem.ServerSystem;
 import ru.politaboba.serverSystem.faction.model.Faction;
 
@@ -26,19 +28,43 @@ public class FactionListener implements Listener {
         plugin.updateAllPlayersDisplay();
     }
 
+    // НОВАЯ ИНТЕРАКТИВНАЯ ВИЗУАЛЬНАЯ RP МЕХАНИКА ПАСПОРТОВ
+    @EventHandler
+    public void onPlayerShowPassport(PlayerInteractEntityEvent event) {
+        if (!(event.getRightClicked() instanceof Player)) return;
+
+        Player clicker = event.getPlayer();
+        Player target = (Player) event.getRightClicked();
+        ItemStack item = clicker.getInventory().getItemInMainHand();
+
+        if (item.getType() == Material.WRITTEN_BOOK && item.hasItemMeta()) {
+            BookMeta meta = (BookMeta) item.getItemMeta();
+
+            // Проверяем, что это действительно легитимный паспорт от Канцелярии сервера
+            if (meta.getTitle() != null && meta.getTitle().contains("Паспорт:") && "§6§lКАНЦЕЛЯРИЯ".equals(meta.getAuthor())) {
+                event.setCancelled(true); // Отменяем стандартное прочтение книги у самого себя
+
+                // Посылаем атмосферные RP-сообщения
+                clicker.sendMessage("§a[РП] Вы уверенно предъявили свое удостоверение личности гражданину §e" + target.getName() + "§a.");
+                target.sendMessage("§a[РП] Игрок §e" + clicker.getName() + " §aпредъявил вам свой государственный паспорт!");
+
+                // Физически открываем паспорт на экране целевого игрока
+                target.openBook(item);
+            }
+        }
+    }
+
     @EventHandler
     public void onInventoryClick(InventoryClickEvent event) {
         String title = event.getView().getTitle();
 
-        // ЕСЛИ ЭТО НЕ НАШИ МЕНЮ — СРАЗУ ИГНОРИРУЕМ И ДАЕМ РАБОТАТЬ ДРУГИМ ПЛАГИНАМ (В ТОМ ЧИСЛЕ BOUNTY)
         if (!title.equals("§0Государственный Аппарат") &&
                 !title.equals("§0Меню Фракции") &&
                 !title.equals("§0Управление Дипломатией")) {
             return;
         }
 
-        // Блокируем кражу предметов строго в меню фракции
-        event.setCancelled(true);
+        event.setCancelled(true); // Защита предметов от кражи в меню
 
         Player player = (Player) event.getWhoClicked();
         ItemStack clickedItem = event.getCurrentItem();
@@ -47,7 +73,6 @@ public class FactionListener implements Listener {
         UUID playerUUID = player.getUniqueId();
         String currentFaction = plugin.getPlayerFactionMap().get(playerUUID);
 
-        // --- ЛОГИКА ОБНОВЛЕННОГО ИНТЕРАКТИВНОГО МЕНЮ ---
         if (title.equals("§0Государственный Аппарат")) {
             if (clickedItem.getType() == Material.KNOWLEDGE_BOOK) {
                 player.closeInventory();
@@ -55,14 +80,13 @@ public class FactionListener implements Listener {
             }
             else if (clickedItem.getType() == Material.WHITE_BANNER) {
                 player.closeInventory();
-                player.sendMessage("§e[Фракции] Введите в чат: §6/f create <название>");
+                player.sendMessage("§e[Фракции] Введите команду: §6/f create <название>");
             }
             else if (clickedItem.getType() == Material.RED_BANNER) {
                 player.closeInventory();
                 openDiplomacyMenu(player);
             }
         }
-        // --- ЛОГИКА МЕНЮ ДИПЛОМАТИИ ---
         else if (title.equals("§0Управление Дипломатией")) {
             if (clickedItem.getType() == Material.WRITABLE_BOOK) {
                 player.closeInventory();
@@ -74,8 +98,7 @@ public class FactionListener implements Listener {
                     player.sendMessage("§cТолько лидер фракции может изменять ЧС!");
                     return;
                 }
-
-                player.sendMessage("§e[Фракции] Чтобы добавить врага, введите: §6/f addenemy <ник>");
+                player.sendMessage("§e[Фракции] Дабы объявить врага, введите: §6/f addenemy <ник>");
             }
         }
     }

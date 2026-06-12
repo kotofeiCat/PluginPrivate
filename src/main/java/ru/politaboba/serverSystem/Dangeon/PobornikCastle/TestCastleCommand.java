@@ -37,8 +37,9 @@ public class TestCastleCommand implements CommandExecutor {
         Location startLocation = targetBlock.getLocation();
         player.sendMessage("§a[Данж] Запуск генерации Замка из NBT схемы...");
 
-        // Создаем данж и автоматически запускаем сессию управления
-        dungeonManager.createDungeon(startLocation);
+        // ИСПРАВЛЕНО: Генерируем ID сессии и передаем его в метод createDungeon, убирая ошибку компиляции
+        String dungeonId = "castle_admin_" + player.getName().toLowerCase();
+        dungeonManager.createDungeon(dungeonId, startLocation);
 
         player.sendMessage("§e[Успех] Замок построен. Зона лобби ожидает активации!");
         return true;

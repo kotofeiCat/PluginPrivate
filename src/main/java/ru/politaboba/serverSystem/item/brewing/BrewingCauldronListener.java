@@ -10,11 +10,12 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
+import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.scheduler.BukkitRunnable;
 import ru.politaboba.serverSystem.ServerSystem;
-import ru.politaboba.serverSystem.item.food.FoodFactory;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -22,11 +23,18 @@ import java.util.Map;
 public class BrewingCauldronListener implements Listener {
 
     private final ServerSystem plugin;
-    // Хранилище: Локация котла -> Состояние варки (сколько ingredients внутри)
     private final Map<Location, CauldronData> cookingCauldrons = new HashMap<>();
 
     public BrewingCauldronListener(ServerSystem plugin) {
         this.plugin = plugin;
+    }
+
+    // ИСПРАВЛЕНО: Аварийная очистка голограмм при перезагрузке/выключении сервера
+    public void cleanup() {
+        for (CauldronData data : cookingCauldrons.values()) {
+            data.reset();
+        }
+        cookingCauldrons.clear();
     }
 
     @EventHandler
@@ -35,11 +43,11 @@ public class BrewingCauldronListener implements Listener {
         Block block = event.getClickedBlock();
         if (block == null) return;
 
-        // ПРОВЕРКА КOTЛОВ: Теперь плагин видит и пустой котел, и котел с водой
+        if (event.getHand() != EquipmentSlot.HAND) return;
+
         Material blockType = block.getType();
         if (blockType != Material.CAULDRON && blockType != Material.WATER_CAULDRON) return;
 
-        // Проверяем, горит ли ПОД котлом костер
         Block under = block.getRelative(0, -1, 0);
         if (under.getType() != Material.CAMPFIRE && under.getType() != Material.SOUL_CAMPFIRE) return;
 
@@ -47,7 +55,6 @@ public class BrewingCauldronListener implements Listener {
         Location loc = block.getLocation();
         ItemStack hand = player.getInventory().getItemInMainHand();
 
-        // Проверяем уровень воды в котле (должен быть наполнен)
         if (block.getBlockData() instanceof Levelled) {
             Levelled levelled = (Levelled) block.getBlockData();
             if (levelled.getLevel() == 0) {
@@ -55,14 +62,17 @@ public class BrewingCauldronListener implements Listener {
                 return;
             }
         } else if (blockType == Material.CAULDRON) {
-            // Если блок — базовый пустой котел без метаданных жидкости
             player.sendMessage("§cВ котле нет воды! Наполните его из ведра.");
             return;
         }
 
         CauldronData data = cookingCauldrons.computeIfAbsent(loc, k -> new CauldronData(loc));
 
-        // Логика закидывания ингредиентов
+        if (data.isCooking) {
+            event.setCancelled(true);
+            return;
+        }
+
         if (hand.getType() == Material.WHEAT && !data.isReady) {
             event.setCancelled(true);
             if (data.wheatCount < 3) {
@@ -99,12 +109,11 @@ public class BrewingCauldronListener implements Listener {
             return;
         }
 
-        // НАБОР ГОТОВОГО СУСЛА В БУТЫЛОЧКУ
         if (hand.getType() == Material.GLASS_BOTTLE && data.isReady) {
             event.setCancelled(true);
             decreaseHandItem(player, hand);
 
-            ItemStack beerWort = FoodFactory.createBeerWort(plugin);
+            ItemStack beerWort = plugin.getFoodManager().getDishById("beer_wort").createCookedItem(plugin);
             if (!player.getInventory().addItem(beerWort).isEmpty()) {
                 loc.getWorld().dropItemNaturally(loc, beerWort);
             }
@@ -112,10 +121,18 @@ public class BrewingCauldronListener implements Listener {
             loc.getWorld().playSound(loc, Sound.ITEM_BOTTLE_FILL, 1.0f, 1.0f);
             player.sendMessage("§aВы успешно набрали Сырое Пивное Сусло в бутылочку!");
 
-            // Очищаем котел и убираем голограмму
             data.reset();
             cookingCauldrons.remove(loc);
-            block.setType(Material.CAULDRON); // Осушаем котел обратно до пустого ванильного состояния
+            block.setType(Material.CAULDRON);
+        }
+    }
+
+    @EventHandler
+    public void onBlockBreak(BlockBreakEvent event) {
+        Location loc = event.getBlock().getLocation();
+        CauldronData data = cookingCauldrons.remove(loc);
+        if (data != null) {
+            data.reset();
         }
     }
 
@@ -123,7 +140,6 @@ public class BrewingCauldronListener implements Listener {
         if (data.wheatCount >= 3 && data.hasSugar && data.hasGlowstone && !data.isCooking) {
             data.isCooking = true;
 
-            // Спавним голограмму ровно по центру над блоком котла
             Location standLoc = data.loc.clone().add(0.5, 0.5, 0.5);
             ArmorStand stand = data.loc.getWorld().spawn(standLoc, ArmorStand.class, s -> {
                 s.setVisible(false);
@@ -132,12 +148,19 @@ public class BrewingCauldronListener implements Listener {
                 s.setCustomName("§6Варка сусла: 0%");
             });
 
-            data.hologram = stand; // Привязываем стойку к данным, чтобы удалить при ресете
+            data.hologram = stand;
 
             new BukkitRunnable() {
                 int progress = 0;
                 @Override
                 public void run() {
+                    if (data.loc.getBlock().getType() != Material.WATER_CAULDRON || !stand.isValid()) {
+                        this.cancel();
+                        data.reset();
+                        cookingCauldrons.remove(data.loc);
+                        return;
+                    }
+
                     progress += 20;
                     stand.setCustomName("§6Варка сусла: §e" + progress + "%");
                     data.loc.getWorld().playSound(data.loc, Sound.BLOCK_BUBBLE_COLUMN_UPWARDS_INSIDE, 1.0f, 0.8f);
@@ -150,7 +173,7 @@ public class BrewingCauldronListener implements Listener {
                         data.loc.getWorld().playSound(data.loc, Sound.BLOCK_BREWING_STAND_BREW, 1.0f, 0.5f);
                     }
                 }
-            }.runTaskTimer(plugin, 0L, 20L); // Шаг в 1 секунду (Полная варка за 5 секунд)
+            }.runTaskTimer(plugin, 0L, 20L);
         }
     }
 
@@ -176,7 +199,7 @@ public class BrewingCauldronListener implements Listener {
         }
 
         void reset() {
-            if (hologram != null) {
+            if (hologram != null && hologram.isValid()) {
                 hologram.remove();
             }
         }

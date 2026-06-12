@@ -1,5 +1,8 @@
 package ru.politaboba.serverSystem.faction.listener;
 
+import net.luckperms.api.LuckPerms;
+import net.luckperms.api.LuckPermsProvider;
+import net.luckperms.api.model.user.User;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
@@ -17,10 +20,13 @@ public class FactionChatListener implements Listener {
 
     private final ServerSystem plugin;
     private final ChatManager chatManager;
+    private final boolean hasLuckPerms;
 
     public FactionChatListener(ServerSystem plugin, ChatManager chatManager) {
         this.plugin = plugin;
         this.chatManager = chatManager;
+        // Защита от крашей: проверяем, установлен ли на сервере LuckPerms
+        this.hasLuckPerms = Bukkit.getPluginManager().isPluginEnabled("LuckPerms");
     }
 
     @EventHandler(priority = EventPriority.HIGH)
@@ -29,6 +35,7 @@ public class FactionChatListener implements Listener {
         UUID senderUUID = sender.getUniqueId();
         String message = event.getMessage().trim();
 
+        // Перехватываем сообщение, чтобы ванильный майнкрафт не дублировал его в стандартном формате
         event.setCancelled(true);
 
         String factionName = plugin.getPlayerFactionMap().get(senderUUID);
@@ -59,14 +66,20 @@ public class FactionChatListener implements Listener {
     }
 
     private void sendLocalMessage(Player sender, String factionName, String message) {
-        String prefix = "§8[Скиталец] ";
+        // Получаем префикс доната напрямую из LuckPerms API
+        String lpPrefix = getLuckPermsPrefix(sender);
+
+        String factionPrefix = "§8[Скиталец] ";
         if (factionName != null) {
             Faction faction = plugin.getFactions().get(factionName);
             ChatColor color = (faction != null) ? faction.getFactionColor() : ChatColor.GRAY;
-            prefix = ChatColor.DARK_GRAY + "[" + color + factionName + ChatColor.DARK_GRAY + "] " + ChatColor.WHITE;
+            factionPrefix = ChatColor.DARK_GRAY + "[" + color + factionName + ChatColor.DARK_GRAY + "] " + ChatColor.WHITE;
         }
 
-        String format = "§7[ЛОКАЛЬНЫЙ] " + prefix + sender.getName() + ": §7" + message;
+        // Сборка локального формата с поддержкой HEX и цветовых кодов через '&'
+        String format = ChatColor.translateAlternateColorCodes('&',
+                "§7[ЛОКАЛЬНЫЙ] " + lpPrefix + factionPrefix + sender.getName() + ": §7" + message);
+
         int radiusSquared = 50 * 50;
 
         for (Player recipient : Bukkit.getOnlinePlayers()) {
@@ -80,36 +93,66 @@ public class FactionChatListener implements Listener {
     }
 
     private void sendFactionMessage(Player sender, String factionName, String message) {
+        // Получаем префикс доната напрямую из LuckPerms API
+        String lpPrefix = getLuckPermsPrefix(sender);
+
         Faction faction = plugin.getFactions().get(factionName);
         ChatColor color = (faction != null) ? faction.getFactionColor() : ChatColor.GREEN;
 
-        String format = color + "⚡ [" + factionName.toUpperCase() + "] §e" + sender.getName() + ": §f" + message;
+        // Вживляем донат-префикс во фракционную рацию
+        String format = ChatColor.translateAlternateColorCodes('&',
+                color + "⚡ [" + factionName.toUpperCase() + "] " + lpPrefix + "§e" + sender.getName() + ": §f" + message);
 
         for (Player recipient : Bukkit.getOnlinePlayers()) {
             String recipientFaction = plugin.getPlayerFactionMap().get(recipient.getUniqueId());
 
-            // Приводим оба названия к нижнему регистру для стопроцентного совпадения
-            if (recipientFaction != null && recipientFaction.toLowerCase().trim().equals(factionName.toLowerCase().trim())) {
+            if (recipientFaction != null && recipientFaction.equalsIgnoreCase(factionName.trim())) {
                 recipient.sendMessage(format);
             }
         }
-
-        // Дублируем в консоль сервера, чтобы ты видел, что пакет ушел
         Bukkit.getLogger().info("[FACTION CHAT: " + factionName + "] " + sender.getName() + ": " + message);
     }
 
     private void sendGlobalMessage(Player sender, String factionName, String message) {
-        String prefix = "§8[Скиталец] ";
+        // Получаем префикс доната напрямую из LuckPerms API
+        String lpPrefix = getLuckPermsPrefix(sender);
+
+        String factionPrefix = "§8[Скиталец] ";
         if (factionName != null) {
             Faction faction = plugin.getFactions().get(factionName);
             ChatColor color = (faction != null) ? faction.getFactionColor() : ChatColor.GOLD;
-            prefix = ChatColor.DARK_GRAY + "[" + color + factionName + ChatColor.DARK_GRAY + "] " + color;
+            factionPrefix = ChatColor.DARK_GRAY + "[" + color + factionName + ChatColor.DARK_GRAY + "] " + color;
         }
 
-        String format = "§e📢 [ГЛОБАЛ] " + prefix + sender.getName() + "§7: §f" + message;
+        // Формат глобального чата со спонсорской припиской
+        String format = ChatColor.translateAlternateColorCodes('&',
+                "§e📢 [ГЛОБАЛ] " + lpPrefix + factionPrefix + sender.getName() + "§7: §f" + message);
 
         for (Player recipient : Bukkit.getOnlinePlayers()) {
             recipient.sendMessage(format);
         }
+    }
+
+    /**
+     * Вспомогательный метод для прямого и надёжного получения префиксов из LuckPerms API
+     */
+    private String getLuckPermsPrefix(Player player) {
+        if (!hasLuckPerms) {
+            return "";
+        }
+        try {
+            LuckPerms luckPerms = LuckPermsProvider.get();
+            User user = luckPerms.getUserManager().getUser(player.getUniqueId());
+            if (user != null) {
+                String prefix = user.getCachedData().getMetaData().getPrefix();
+                if (prefix != null && !prefix.isEmpty()) {
+                    // Возвращаем сырую строку префикса (цвета обработаются методом translateAlternateColorCodes)
+                    return prefix + " ";
+                }
+            }
+        } catch (Exception e) {
+            // Защита на случай, если плагин запрашивает префикс во время перезагрузки LuckPerms
+        }
+        return "";
     }
 }

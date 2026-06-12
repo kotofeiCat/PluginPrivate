@@ -6,8 +6,8 @@ public class Agreement {
     private final String id;
     private final String partyA;
     private final String partyB;
-    private final String title;       // Краткое название (например, "Мирный договор")
-    private final List<String> pages; // Весь сложный текст документа по страницам
+    private final String title;
+    private final List<String> pages;
     private final long timestamp;
 
     public Agreement(String id, String partyA, String partyB, String title, List<String> pages, long timestamp) {

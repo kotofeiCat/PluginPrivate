@@ -1,6 +1,6 @@
 package ru.politaboba.serverSystem.faction.command;
 
-import me.clip.placeholderapi.PlaceholderAPI; // Импортируем PlaceholderAPI
+import me.clip.placeholderapi.PlaceholderAPI;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.command.Command;
@@ -14,13 +14,10 @@ import ru.politaboba.serverSystem.faction.model.Faction;
 public class GlobalChatCommand implements CommandExecutor {
 
     private final ServerSystem plugin;
-    private final ChatManager chatManager;
     private final boolean hasPlaceholderAPI;
 
     public GlobalChatCommand(ServerSystem plugin, ChatManager chatManager) {
         this.plugin = plugin;
-        this.chatManager = chatManager;
-        // Проверяем, установлен ли PlaceholderAPI на сервере, чтобы избежать ошибок
         this.hasPlaceholderAPI = Bukkit.getPluginManager().isPluginEnabled("PlaceholderAPI");
     }
 
@@ -29,23 +26,22 @@ public class GlobalChatCommand implements CommandExecutor {
         if (!(sender instanceof Player)) return true;
         Player player = (Player) sender;
 
-        // Команда /g <текст> (Глобальный чат)
+        // ГЛОБАЛЬНЫЙ ЧАТ ЧЕРЕЗ /g
         if (label.equalsIgnoreCase("g")) {
             if (args.length == 0) {
-                player.sendMessage("§cИспользование: /g <сообщение> или пишите знак ! перед текстом в обычном чате.");
+                player.sendMessage("§cИспользование: /g <сообщение> или пишите знак ! перед текстом в чате.");
                 return true;
             }
             String message = String.join(" ", args);
             String factionName = plugin.getPlayerFactionMap().get(player.getUniqueId());
 
-            // 1. Получаем префикс из LuckPerms через PlaceholderAPI
+            // 1. Спонсорский префикс из LuckPerms
             String lpPrefix = "";
             if (hasPlaceholderAPI) {
-                // Плейсхолдер %luckperms_prefix% вернет ярко-розовый "[Спонсор]" со всеми цветами
                 lpPrefix = PlaceholderAPI.setPlaceholders(player, "%luckperms_prefix%");
             }
 
-            // 2. Формируем префикс фракции (или Скитальца)
+            // 2. Префикс фракции
             String factionPrefix = "§8[Скиталец] ";
             if (factionName != null) {
                 Faction faction = plugin.getFactions().get(factionName);
@@ -53,8 +49,7 @@ public class GlobalChatCommand implements CommandExecutor {
                 factionPrefix = ChatColor.DARK_GRAY + "[" + color + factionName + ChatColor.DARK_GRAY + "] " + color;
             }
 
-            // 3. Выводим в чат: [ГЛОБАЛ] [Спонсор] [Фракция] Ник: сообщение
-            // Используем ChatColor.translateAlternateColorCodes для поддержки HEX-цветов в сообщении
+            // Сборка сообщения
             String finalMessage = ChatColor.translateAlternateColorCodes('&',
                     "§e📢 [ГЛОБАЛ] " + lpPrefix + factionPrefix + player.getName() + "§7: §f" + message);
 
@@ -62,7 +57,7 @@ public class GlobalChatCommand implements CommandExecutor {
             return true;
         }
 
-        // Команда /msg <ник> <текст>
+        // ЛИЧНЫЕ СООБЩЕНИЯ (/msg, /w)
         if (label.equalsIgnoreCase("msg") || label.equalsIgnoreCase("w")) {
             if (args.length < 2) {
                 player.sendMessage("§cИспользование: /msg <ник> <сообщение>");
@@ -81,25 +76,6 @@ public class GlobalChatCommand implements CommandExecutor {
 
             player.sendMessage("§d[Я -> " + target.getName() + "] §f" + privateMessage);
             target.sendMessage("§d[" + player.getName() + " -> Я] §f" + privateMessage);
-            return true;
-        }
-
-        // Команда /f chat или /faction chat (Переключение режимов)
-        if ((label.equalsIgnoreCase("faction") || label.equalsIgnoreCase("f")) && args.length > 0 && args[0].equalsIgnoreCase("chat")) {
-            String factionName = plugin.getPlayerFactionMap().get(player.getUniqueId());
-            if (factionName == null) {
-                player.sendMessage("§cВы должны состоять во фракции, чтобы включить зашифрованный радиоканал!");
-                return true;
-            }
-
-            chatManager.toggleChatMode(player.getUniqueId());
-            ChatManager.ChatMode newMode = chatManager.getChatMode(player.getUniqueId());
-
-            if (newMode == ChatManager.ChatMode.FACTION) {
-                player.sendMessage("§a[РАДИО] Вы подключились к зашифрованной частоте фракции §e" + factionName + "§a. Все ваши сообщения теперь видят только союзники.");
-            } else {
-                player.sendMessage("§7[ЧАТ] Вы вернулись на открытую частоту (локальный радиус 50 блоков).");
-            }
             return true;
         }
 

@@ -4,15 +4,12 @@ import net.kyori.adventure.bossbar.BossBar;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
-import org.bukkit.Bukkit;
-import org.bukkit.Location;
-import org.bukkit.Material;
-import org.bukkit.NamespacedKey;
-import org.bukkit.World;
+import org.bukkit.*;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
-import org.bukkit.block.Block;
-import org.bukkit.block.Container;
+import org.bukkit.block.*;
+import org.bukkit.block.data.Bisected;
+import org.bukkit.block.data.type.Door;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.*;
@@ -353,7 +350,6 @@ public class DungeonSession {
     }
 
     public boolean tryOpenDoor(Block clickedBlock) {
-        // Разрешаем обрабатывать клик в стейтах LOOTING и BOSS
         if (state != State.LOOTING && state != State.BOSS) {
             plugin.getLogger().info("[Dungeon] Отмена открытия ворот. Неподходящий стейт: " + state.name());
             return false;
@@ -368,7 +364,6 @@ public class DungeonSession {
         boolean nextToDoor = false;
         Location clickedLoc = clickedBlock.getLocation();
 
-        // Проверяем, действительно ли игрок кликнул по блоку рядом с зоной дверей
         for (Map<?, ?> offset : doorOffsets) {
             Location doorLoc = origin.clone().add(
                     getSafeDouble(offset.get("x")),
@@ -376,7 +371,6 @@ public class DungeonSession {
                     getSafeDouble(offset.get("z"))
             );
 
-            // Радиус 5.0 блоков — берем с запасом, чтобы точно сработало
             if (doorLoc.getWorld().equals(clickedLoc.getWorld()) && doorLoc.distance(clickedLoc) <= 5.0) {
                 nextToDoor = true;
                 break;
@@ -384,9 +378,8 @@ public class DungeonSession {
         }
 
         if (nextToDoor) {
-            plugin.getLogger().info("[Dungeon] Дверь опознана! Начинаем принудительный снос блоков ворот...");
+            plugin.getLogger().info("[Dungeon] Дверь опознана! Начинаем аккуратный снос блоков ворот...");
 
-            // Сносим блоки дверей строго по координатам из конфига
             for (Map<?, ?> offset : doorOffsets) {
                 Location loc = origin.clone().add(
                         getSafeDouble(offset.get("x")),
@@ -396,33 +389,39 @@ public class DungeonSession {
 
                 Block doorPart = loc.getBlock();
 
-                // Эффекты разрушения блоков
                 if (doorPart.getType() != Material.AIR) {
+                    // Спавним частицы разрушения блока
                     doorPart.getWorld().spawnParticle(
-                            org.bukkit.Particle.BLOCK,
+                            Particle.BLOCK,
                             doorPart.getLocation().add(0.5, 0.5, 0.5),
                             15,
                             doorPart.getBlockData()
                     );
-                }
 
-                // Агрессивный снос: превращаем в воздух сам блок, а также блоки строго НАД и ПОД ним
-                // Это решает проблему с двухблочными железными дверями и решетками
-                doorPart.setType(Material.AIR);
-                doorPart.getRelative(org.bukkit.block.BlockFace.UP).setType(Material.AIR);
-                doorPart.getRelative(org.bukkit.block.BlockFace.DOWN).setType(Material.AIR);
+                    // Если это ванильная дверь (железная/деревянная), у неё есть верхняя и нижняя часть
+                    if (doorPart.getBlockData() instanceof Door doorData) {
+                        // Определяем, где вторая половина двери, и убираем её тоже
+                        if (doorData.getHalf() == Door.Half.TOP) {
+                            doorPart.getRelative(BlockFace.UP).setType(Material.AIR);
+                        } else {
+                            doorPart.getRelative(BlockFace.DOWN).setType(Material.AIR);
+                        }
+                    }
+
+                    // Превращаем в воздух сам блок, указанный в конфиге
+                    doorPart.setType(Material.AIR);
+                }
             }
 
-            // Звуки открытия ворот
-            clickedBlock.getWorld().playSound(clickedLoc, org.bukkit.Sound.ENTITY_ZOMBIE_BREAK_WOODEN_DOOR, 1.0f, 0.7f);
-            clickedBlock.getWorld().playSound(clickedLoc, org.bukkit.Sound.BLOCK_IRON_TRAPDOOR_OPEN, 1.0f, 0.5f);
+            // Эффекты открытия
+            clickedBlock.getWorld().playSound(clickedLoc, Sound.ENTITY_ZOMBIE_BREAK_WOODEN_DOOR, 1.0f, 0.7f);
+            clickedBlock.getWorld().playSound(clickedLoc, Sound.BLOCK_IRON_TRAPDOOR_OPEN, 1.0f, 0.5f);
 
-            // Спавним босса ТОЛЬКО если мы еще не переключились в этот стейт ранее
             if (this.state != State.BOSS) {
                 this.state = State.BOSS;
                 spawnBossStage();
             } else {
-                plugin.getLogger().info("[Dungeon] Босс уже был заспавнен ранее. Просто открываем проход.");
+                plugin.getLogger().info("[Dungeon] ...Босс уже был заспавнен ранее. Просто открываем проход.");
             }
 
             return true;
@@ -441,13 +440,13 @@ public class DungeonSession {
 
         Random random = new Random();
 
-        // Получаем реестр зачарований
+        // Реестр зачарований
         Enchantment sharpness = org.bukkit.Registry.ENCHANTMENT.get(NamespacedKey.minecraft("sharpness"));
         Enchantment protection = org.bukkit.Registry.ENCHANTMENT.get(NamespacedKey.minecraft("protection"));
         Enchantment power = org.bukkit.Registry.ENCHANTMENT.get(NamespacedKey.minecraft("power"));
         Enchantment unbreaking = org.bukkit.Registry.ENCHANTMENT.get(NamespacedKey.minecraft("unbreaking"));
 
-        plugin.getLogger().info("[Dungeon] Распределение категорий лута для " + chestOffsets.size() + " сундуков...");
+        plugin.getLogger().info("[Dungeon] Распределение категорий лута для " + chestOffsets.size() + " сундуков/бочек...");
 
         for (Map<?, ?> offset : chestOffsets) {
             Location loc = origin.clone().add(
@@ -462,17 +461,16 @@ public class DungeonSession {
 
             Block block = loc.getBlock();
 
-            // Гарантируем, что там стоит контейнер (сундук)
             if (block.getType() != Material.CHEST && block.getType() != Material.BARREL) {
                 block.setType(Material.CHEST, false);
             }
 
             org.bukkit.block.BlockState state = block.getState();
-            if (state instanceof org.bukkit.block.Chest chest) {
-                org.bukkit.inventory.Inventory inv = chest.getSnapshotInventory();
-                inv.clear(); // Очищаем старый лут подчистую
 
-                // Роллим категорию сундука (от 0.0 до 1.0)
+            if (state instanceof Container container) {
+                org.bukkit.inventory.Inventory inv = container.getSnapshotInventory();
+                inv.clear();
+
                 double tierRoll = random.nextDouble();
                 String tierName;
                 NamedTextColor tierColor;
@@ -480,62 +478,41 @@ public class DungeonSession {
 
                 if (tierRoll < 0.55) {
                     // ==========================================
-                    // 1. ПЛОХОЙ СУНДУК (Шанс 55% -> от 0.0 до 0.55)
+                    // 1. ПЛОХОЙ СУНДУК (Шанс 55%) — Расходники и Жизнеобеспечение
                     // ==========================================
                     tierName = "ПЛОХОЙ СУНДУК";
                     tierColor = NamedTextColor.GRAY;
-                    itemsCount = 3 + random.nextInt(3); // 3-5 предметов
+                    itemsCount = 3 + random.nextInt(3); // 3-5 слотов
 
                     for (int i = 0; i < itemsCount; i++) {
                         int slot = random.nextInt(inv.getSize());
                         if (inv.getItem(slot) != null) continue;
 
                         double itemRoll = random.nextDouble();
-                        if (itemRoll < 0.25) {
-                            inv.setItem(slot, new ItemStack(Material.ROTTEN_FLESH, 2 + random.nextInt(4)));
-                        } else if (itemRoll < 0.50) {
-                            inv.setItem(slot, new ItemStack(Material.BREAD, 1 + random.nextInt(3)));
-                        } else if (itemRoll < 0.70) {
-                            inv.setItem(slot, new ItemStack(Material.COAL, 3 + random.nextInt(5)));
-                        } else if (itemRoll < 0.90) {
-                            inv.setItem(slot, new ItemStack(Material.IRON_INGOT, 1 + random.nextInt(3)));
+                        if (itemRoll < 0.20) {
+                            // Спектральные стрелы для зачистки
+                            inv.setItem(slot, new ItemStack(Material.SPECTRAL_ARROW, 4 + random.nextInt(5)));
+                        } else if (itemRoll < 0.40) {
+                            // Пузырьки опыта
+                            inv.setItem(slot, new ItemStack(Material.EXPERIENCE_BOTTLE, 1 + random.nextInt(3)));
+                        } else if (itemRoll < 0.65) {
+                            // Топовая еда — Золотая морковь
+                            inv.setItem(slot, new ItemStack(Material.GOLDEN_CARROT, 2 + random.nextInt(4)));
+                        } else if (itemRoll < 0.85) {
+                            // Валюта — Изумруды
+                            inv.setItem(slot, new ItemStack(Material.EMERALD, 1 + random.nextInt(4)));
                         } else {
-                            inv.setItem(slot, new ItemStack(Material.BONE, 2));
+                            // Железо для крафта / восполнения щитов
+                            inv.setItem(slot, new ItemStack(Material.IRON_INGOT, 1 + random.nextInt(3)));
                         }
                     }
 
                 } else if (tierRoll < 0.90) {
                     // ==========================================
-                    // 2. НОРМАЛЬНЫЙ СУНДУК (Шанс 35% -> от 0.55 до 0.90)
+                    // 2. НОРМАЛЬНЫЙ СУНДУК (Шанс 35%) — Экипировка и Ценности
                     // ==========================================
                     tierName = "НОРМАЛЬНЫЙ СУНДУК";
                     tierColor = NamedTextColor.GOLD;
-                    itemsCount = 4 + random.nextInt(4); // 4-7 предметов
-
-                    for (int i = 0; i < itemsCount; i++) {
-                        int slot = random.nextInt(inv.getSize());
-                        if (inv.getItem(slot) != null) continue;
-
-                        double itemRoll = random.nextDouble();
-                        if (itemRoll < 0.15) {
-                            inv.setItem(slot, new ItemStack(Material.DIAMOND_SWORD));
-                        } else if (itemRoll < 0.35) {
-                            inv.setItem(slot, new ItemStack(Material.GOLDEN_APPLE, 1 + random.nextInt(2)));
-                        } else if (itemRoll < 0.60) {
-                            inv.setItem(slot, new ItemStack(Material.DIAMOND, 1 + random.nextInt(2)));
-                        } else if (itemRoll < 0.85) {
-                            inv.setItem(slot, new ItemStack(Material.GOLD_INGOT, 4 + random.nextInt(4)));
-                        } else {
-                            inv.setItem(slot, new ItemStack(Material.LAPIS_LAZULI, 6));
-                        }
-                    }
-
-                } else {
-                    // ==========================================
-                    // 3. ОТЛИЧНЫЙ СУНДУК (Шанс 10% -> от 0.90 до 1.0)
-                    // ==========================================
-                    tierName = "ОТЛИЧНЫЙ СУНДУК";
-                    tierColor = NamedTextColor.AQUA;
                     itemsCount = 4 + random.nextInt(3); // 4-6 предметов
 
                     for (int i = 0; i < itemsCount; i++) {
@@ -543,9 +520,54 @@ public class DungeonSession {
                         if (inv.getItem(slot) != null) continue;
 
                         double itemRoll = random.nextDouble();
+                        if (itemRoll < 0.20) {
+                            // Железный меч (Острота II)
+                            ItemStack ironSword = new ItemStack(Material.IRON_SWORD);
+                            ItemMeta meta = ironSword.getItemMeta();
+                            if (meta != null && sharpness != null) {
+                                meta.addEnchant(sharpness, 2, true);
+                                ironSword.setItemMeta(meta);
+                            }
+                            inv.setItem(slot, ironSword);
+                        } else if (itemRoll < 0.45) {
+                            // Золотые яблоки для файтов фракций
+                            inv.setItem(slot, new ItemStack(Material.GOLDEN_APPLE, 1 + random.nextInt(2)));
+                        } else if (itemRoll < 0.65) {
+                            // Чистые алмазы в экономику
+                            inv.setItem(slot, new ItemStack(Material.DIAMOND, 1 + random.nextInt(2)));
+                        } else if (itemRoll < 0.85) {
+                            // Золотые слитки (фракционный ресурс)
+                            inv.setItem(slot, new ItemStack(Material.GOLD_INGOT, 3 + random.nextInt(4)));
+                        } else {
+                            // Ванильные книги IV уровня
+                            ItemStack book = new ItemStack(Material.ENCHANTED_BOOK);
+                            EnchantmentStorageMeta meta = (EnchantmentStorageMeta) book.getItemMeta();
+                            if (meta != null && unbreaking != null) {
+                                meta.addStoredEnchant(unbreaking, 3, true); // Неразрушимость III как пример базовой книги
+                                book.setItemMeta(meta);
+                            }
+                            inv.setItem(slot, book);
+                        }
+                    }
+
+                } else {
+                    // ==========================================
+                    // 3. ОТЛИЧНЫЙ СУНДУК (Шанс 10%) — Эпические артефакты / Топ-ресурсы
+                    // ==========================================
+                    tierName = "ОТЛИЧНЫЙ СУНДУК";
+                    tierColor = NamedTextColor.AQUA;
+                    itemsCount = 3 + random.nextInt(3); // 3-5 ценных предметов
+
+                    for (int i = 0; i < itemsCount; i++) {
+                        int slot = random.nextInt(inv.getSize());
+                        if (inv.getItem(slot) != null) continue;
+
+                        double itemRoll = random.nextDouble();
                         if (itemRoll < 0.15) {
-                            inv.setItem(slot, new ItemStack(Material.NETHERITE_INGOT, 1));
+                            // Крайне ценный фракционный ресурс
+                            inv.setItem(slot, new ItemStack(Material.NETHERITE_SCRAP, 1));
                         } else if (itemRoll < 0.40) {
+                            // Древние свитки с чарами VI уровня
                             ItemStack book = new ItemStack(Material.ENCHANTED_BOOK);
                             EnchantmentStorageMeta meta = (EnchantmentStorageMeta) book.getItemMeta();
                             if (meta != null) {
@@ -563,7 +585,25 @@ public class DungeonSession {
                                 book.setItemMeta(meta);
                                 inv.setItem(slot, book);
                             }
-                        } else if (itemRoll < 0.70) {
+                        } else if (itemRoll < 0.65) {
+                            // Кастомное легендарное оружие: Топор Палача Малакая
+                            ItemStack bossAxe = new ItemStack(Material.DIAMOND_AXE);
+                            ItemMeta axeMeta = bossAxe.getItemMeta();
+                            if (axeMeta != null) {
+                                if (sharpness != null) axeMeta.addEnchant(sharpness, 5, true);
+                                if (unbreaking != null) axeMeta.addEnchant(unbreaking, 3, true);
+                                axeMeta.displayName(Component.text("🪓 Топор Палача Малакая", NamedTextColor.RED, TextDecoration.BOLD));
+
+                                List<Component> lore = new ArrayList<>();
+                                lore.add(Component.text("Тяжелое орудие, окропленное кровью", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
+                                lore.add(Component.text("предателей замка.", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
+                                axeMeta.lore(lore);
+
+                                bossAxe.setItemMeta(axeMeta);
+                            }
+                            inv.setItem(slot, bossAxe);
+                        } else if (itemRoll < 0.85) {
+                            // Алмазный доспех Хранителя (Защита IV)
                             Material[] armorTypes = {Material.DIAMOND_HELMET, Material.DIAMOND_CHESTPLATE, Material.DIAMOND_LEGGINGS, Material.DIAMOND_BOOTS};
                             ItemStack armor = new ItemStack(armorTypes[random.nextInt(armorTypes.length)]);
                             ItemMeta meta = armor.getItemMeta();
@@ -575,15 +615,21 @@ public class DungeonSession {
                             }
                             inv.setItem(slot, armor);
                         } else {
-                            inv.setItem(slot, new ItemStack(Material.EMERALD, 4 + random.nextInt(5)));
+                            // Главный артефакт выживания для PVP фракций
+                            inv.setItem(slot, new ItemStack(Material.TOTEM_OF_UNDYING, 1));
                         }
                     }
                 }
 
-                // Обновляем отображение имени контейнера
-                chest.customName(Component.text(tierName, tierColor, TextDecoration.BOLD));
-                chest.update(true, false);
-                plugin.getLogger().info("[Dungeon] Сгенерирован " + tierName + " на координатах " + loc.toVector());
+                // Устанавливаем заголовок контейнеру
+                container.customName(Component.text(tierName, tierColor, TextDecoration.BOLD));
+
+                // Перезаписываем изменения инвентаря и метаданных в мир (работает и для Chest, и для Barrel)
+                container.update(true, false);
+
+                plugin.getLogger().info("[Dungeon] Сгенерирован " + tierName + " на координатах " + loc.toVector() + " (" + block.getType().name() + ")");
+            } else {
+                plugin.getLogger().warning("[Dungeon] Не удалось обработать контейнер на " + loc.toVector() + ". Тип блока: " + block.getType());
             }
         }
     }
@@ -642,6 +688,32 @@ public class DungeonSession {
                             Component.text("ПОБЕДА!", NamedTextColor.GOLD, TextDecoration.BOLD),
                             Component.text("Телепортация в лобби через 7 секунд...", NamedTextColor.GRAY)
                     ));
+
+                    // =================================================================
+                    // ИНТЕГРАЦИЯ ТВОЕЙ СИСТЕМЫ ВАЛЮТЫ И КЕЙСОВ
+                    // =================================================================
+                    int rewardCoins = 25; // Количество донат-коинов за прохождение данжа
+
+                    // 1. Проверяем, что плагин является экземпляром ServerSystem
+                    if (plugin instanceof ru.politaboba.serverSystem.ServerSystem serverPlugin) {
+
+                        // 2. Начисляем коины напрямую в базу через твой CaseManager
+                        serverPlugin.getCaseManager().addCoins(uuid, rewardCoins);
+
+                        // 3. Присылаем красивое уведомление игроку в чат и экшенбар
+                        p.sendMessage("");
+                        p.sendMessage("§d§l💎 НАГРАДА ИЗ ПОДЗЕМЕЛЬЯ 💎");
+                        p.sendMessage("§f Вы успешно одолели Малакая и очистили замок!");
+                        p.sendMessage("§f На ваш донат-счет зачислено: §a" + rewardCoins + " коинов§f.");
+                        p.sendMessage("§7 Использовать коины можно в меню: §e/case");
+                        p.sendMessage("");
+
+                        p.sendActionBar("§d§l+ " + rewardCoins + " Коинов (Баланс обновлен)");
+                    }
+
+                    // 4. Проигрываем приятный звук получения монет (звук сбора опыта в Minecraft)
+                    p.playSound(p.getLocation(), org.bukkit.Sound.ENTITY_EXPERIENCE_ORB_PICKUP, 1.0f, 0.8f);
+                    // =================================================================
                 }
             }
 

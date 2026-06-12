@@ -16,7 +16,6 @@ import java.util.*;
 public class ArrestManager {
 
     private final ServerSystem plugin;
-    // Карта: UUID жертвы -> UUID конвоира
     private final Map<UUID, UUID> arrestedPlayers = new HashMap<>();
 
     public ArrestManager(ServerSystem plugin) {
@@ -30,17 +29,33 @@ public class ArrestManager {
         victim.sendMessage("§c§l[АРЕСТ] §cВы были закованы в кандалы игроком §e" + cop.getName() + "§c!");
         cop.sendMessage("§a§l[АРЕСТ] §aВы успешно заковали в кандалы §e" + victim.getName() + "§a. Ведите его за собой!");
 
-        // Накладываем эффекты: заменяем SLOW на SLOWNESS
         victim.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, Integer.MAX_VALUE, 4, false, false));
         victim.addPotionEffect(new PotionEffect(PotionEffectType.BLINDNESS, Integer.MAX_VALUE, 0, false, false));
     }
 
     public void releasePlayer(Player victim) {
         arrestedPlayers.remove(victim.getUniqueId());
-        // Снимаем эффекты: здесь тоже заменяем SLOW на SLOWNESS
         victim.removePotionEffect(PotionEffectType.SLOWNESS);
         victim.removePotionEffect(PotionEffectType.BLINDNESS);
         victim.sendMessage("§a§l[АРЕСТ] §aС вас сняли кандалы! Вы свободны.");
+    }
+
+    // РЕШЕНИЕ БАГА: Освобождение арестованных, если конвоир вышел из игры
+    public void releaseVictimsOfCop(UUID copUUID) {
+        List<UUID> toRelease = new ArrayList<>();
+        for (Map.Entry<UUID, UUID> entry : arrestedPlayers.entrySet()) {
+            if (entry.getValue().equals(copUUID)) {
+                toRelease.add(entry.getKey());
+            }
+        }
+        for (UUID victimUUID : toRelease) {
+            Player victim = Bukkit.getPlayer(victimUUID);
+            if (victim != null && victim.isOnline()) {
+                releasePlayer(victim);
+            } else {
+                arrestedPlayers.remove(victimUUID);
+            }
+        }
     }
 
     public boolean isArrested(UUID uuid) {
@@ -51,7 +66,6 @@ public class ArrestManager {
         return arrestedPlayers.get(victimUUID);
     }
 
-    // Создание предмета кандалов
     public static ItemStack createHandcuffs() {
         ItemStack cuffs = new ItemStack(Material.IRON_BARS);
         ItemMeta meta = cuffs.getItemMeta();
@@ -67,7 +81,6 @@ public class ArrestManager {
         return cuffs;
     }
 
-    // Поток (Task), который каждые 2 тика подтягивает арестованного к конвоиру
     private void startDragTask() {
         Bukkit.getScheduler().runTaskTimer(plugin, () -> {
             for (Map.Entry<UUID, UUID> entry : arrestedPlayers.entrySet()) {
@@ -78,21 +91,18 @@ public class ArrestManager {
                     Location copLoc = cop.getLocation();
                     Location vicLoc = victim.getLocation();
 
-                    // Если они в одном мире и расстояние больше 3 блоков — плавно тянем
                     if (copLoc.getWorld().equals(vicLoc.getWorld())) {
                         double distance = copLoc.distance(vicLoc);
 
                         if (distance > 15) {
-                            // Если конвоир убежал слишком далеко (например, телепортировался), переносим жертву к нему
                             victim.teleport(copLoc);
                         } else if (distance > 3) {
-                            // Математика плавного подтягивания вектора движения
                             Vector direction = copLoc.toVector().subtract(vicLoc.toVector()).normalize();
                             victim.setVelocity(direction.multiply(0.4));
                         }
                     }
                 }
             }
-        }, 0L, 2L); // Проверка каждые 2 тика (0.1 секунды) для идеальной плавности
+        }, 0L, 2L);
     }
 }

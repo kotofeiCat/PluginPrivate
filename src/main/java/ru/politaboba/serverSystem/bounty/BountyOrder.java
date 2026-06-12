@@ -6,7 +6,7 @@ public class BountyOrder {
     private final String targetName;
     private final UUID targetUUID;
     private final String creatorName;
-    private final int rewardAmount; // Награда в алмазах
+    private final int rewardAmount;
 
     public BountyOrder(String targetName, UUID targetUUID, String creatorName, int rewardAmount) {
         this.targetName = targetName;

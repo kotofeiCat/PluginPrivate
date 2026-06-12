@@ -1,12 +1,14 @@
 package ru.politaboba.serverSystem.contract;
 
 import org.bukkit.Bukkit;
+import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.BookMeta;
 import org.bukkit.inventory.meta.ItemMeta;
@@ -20,6 +22,18 @@ public class ContractCommand implements CommandExecutor {
     private final ServerSystem plugin;
     private final Map<UUID, Agreement> pendingContracts = new HashMap<>();
 
+    // Кастомные холдеры для безопасной идентификации инвентарей
+    public static class ContractArchiveHolder implements InventoryHolder {
+        @Override public Inventory getInventory() { return null; }
+    }
+
+    public static class ContractAcceptHolder implements InventoryHolder {
+        private final Agreement agreement;
+        public ContractAcceptHolder(Agreement agreement) { this.agreement = agreement; }
+        public Agreement getAgreement() { return agreement; }
+        @Override public Inventory getInventory() { return null; }
+    }
+
     public ContractCommand(ServerSystem plugin) {
         this.plugin = plugin;
     }
@@ -30,13 +44,22 @@ public class ContractCommand implements CommandExecutor {
         Player player = (Player) sender;
         UUID playerUUID = player.getUniqueId();
 
-        // /contract или /contract list — открывает архив документов
         if (args.length == 0 || args[0].equalsIgnoreCase("list")) {
             openContractArchive(player);
             return true;
         }
 
-        // Команда расторжения: /contract terminate <ID>
+        // Позволяет игроку открыть меню контракта, который ему прислали
+        if (args[0].equalsIgnoreCase("review")) {
+            Agreement pending = pendingContracts.get(playerUUID);
+            if (pending == null) {
+                player.sendMessage("§cУ вас нет документов на рассмотрении.");
+                return true;
+            }
+            openAcceptMenu(player, pending);
+            return true;
+        }
+
         if (args[0].equalsIgnoreCase("terminate") && args.length > 1) {
             String targetId = args[1].trim();
             Agreement agreementToTerminate = null;
@@ -53,14 +76,12 @@ public class ContractCommand implements CommandExecutor {
                 return true;
             }
 
-            // Проверяем, является ли игрок одной из сторон (по нику или названию фракции)
             String playerFaction = plugin.getPlayerFactionMap().get(playerUUID);
             String stateName = playerFaction != null ? "Государство " + playerFaction : "";
 
             boolean isPartyA = agreementToTerminate.getPartyA().equals(player.getName()) || (!stateName.isEmpty() && agreementToTerminate.getPartyA().equals(stateName));
             boolean isPartyB = agreementToTerminate.getPartyB().equals(player.getName()) || (!stateName.isEmpty() && agreementToTerminate.getPartyB().equals(stateName));
 
-            // Если это государственные фракции, расторгнуть может только лидер фракции
             if (!stateName.isEmpty()) {
                 UUID leaderUUID = plugin.getFactions().get(playerFaction).getLeader();
                 if ((agreementToTerminate.getPartyA().equals(stateName) || agreementToTerminate.getPartyB().equals(stateName)) && !playerUUID.equals(leaderUUID)) {
@@ -74,16 +95,13 @@ public class ContractCommand implements CommandExecutor {
                 return true;
             }
 
-            // Удаляем контракт из архива
             plugin.getAgreements().remove(agreementToTerminate);
 
-            // Оповещаем сервер
-            String cleanTitle = agreementToTerminate.getTitle().replaceAll("§[0-9a-fk-or]", "");
+            String cleanTitle = ChatColor.stripColor(agreementToTerminate.getTitle());
             Bukkit.broadcastMessage("§c§l📜 [Дипломатия] Договор #" + agreementToTerminate.getId() + " [" + cleanTitle + "] был в одностороннем порядке расторгнут стороной §e" + player.getName() + "§c!");
             return true;
         }
 
-        // Команда отправки: /contract send <НикПолучателя>
         if (args[0].equalsIgnoreCase("send") && args.length > 1) {
             ItemStack item = player.getInventory().getItemInMainHand();
             if (item.getType() != Material.WRITABLE_BOOK) {
@@ -150,7 +168,7 @@ public class ContractCommand implements CommandExecutor {
     }
 
     private void openContractArchive(Player player) {
-        Inventory gui = Bukkit.createInventory(null, 45, "§0Архив Государственных Пактов");
+        Inventory gui = Bukkit.createInventory(new ContractArchiveHolder(), 45, "§0Архив Государственных Пактов");
         SimpleDateFormat sdf = new SimpleDateFormat("dd.MM.yyyy");
         int slot = 0;
 
@@ -176,9 +194,8 @@ public class ContractCommand implements CommandExecutor {
         player.openInventory(gui);
     }
 
-    // Сделали метод PUBLIC, чтобы листенер мог повторно вернуть меню
     public void openAcceptMenu(Player leaderB, Agreement agreement) {
-        Inventory gui = Bukkit.createInventory(null, 27, "§0Подписание: #" + agreement.getId());
+        Inventory gui = Bukkit.createInventory(new ContractAcceptHolder(agreement), 27, "§0Подписание: #" + agreement.getId());
 
         ItemStack info = new ItemStack(Material.WRITABLE_BOOK);
         ItemMeta infoMeta = info.getItemMeta();

@@ -19,26 +19,63 @@ import org.bukkit.plugin.java.JavaPlugin;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.UUID;
+import java.util.*;
 
 public class DungeonManager {
 
     private final JavaPlugin plugin;
     private final ArchVindicatorBoss bossMechanics;
-    private final List<DungeonSession> activeSessions = new ArrayList<>();
+
+    // Новые структуры данных для синхронизации с базой данных и оптимизации
+    private final Map<String, Location> activeDungeonOrigins = new HashMap<>();
+    private final Map<Location, DungeonSession> activeSessions = new HashMap<>();
 
     public DungeonManager(JavaPlugin plugin, ArchVindicatorBoss bossMechanics) {
         this.plugin = plugin;
         this.bossMechanics = bossMechanics;
     }
 
-    public void createDungeon(Location targetLocation) {
+    /**
+     * Возвращает карту всех зарегистрированных точек данжей (ID -> Location)
+     * Используется напрямую в FactionDataManager для сохранения в MySQL/SQLite!
+     */
+    public Map<String, Location> getActiveDungeonOrigins() {
+        return this.activeDungeonOrigins;
+    }
+
+    /**
+     * Создание нового данжа в мире (например, командой админа)
+     */
+    public void createDungeon(String id, Location targetLocation) {
+        // Сохраняем точку в реестр данжей
+        this.activeDungeonOrigins.put(id, targetLocation);
+
+        // Регенерируем блоки схематики
         pasteSchematic(targetLocation);
+
+        // Создаем рабочую сессию
         DungeonSession session = new DungeonSession(plugin, targetLocation, bossMechanics, this);
-        activeSessions.add(session);
-        plugin.getLogger().info("[Dungeon] Сессия данжа успешно создана на координатах: " + targetLocation.toVector());
+        this.activeSessions.put(targetLocation, session);
+
+        plugin.getLogger().info("[Dungeon] Создан новый данж '" + id + "' на координатах: " + targetLocation.toVector());
+    }
+
+    /**
+     * Метод восстановления данжей из базы данных при старте сервера
+     * Вызывается автоматически из FactionDataManager.loadAll()
+     */
+    public void restoreDungeonSession(String id, Location targetLocation) {
+        // Восстанавливаем ID и локацию в памяти плагина
+        this.activeDungeonOrigins.put(id, targetLocation);
+
+        // Создаем чистую сессию в режиме ожидания игроков (LOBBY)
+        DungeonSession restoredSession = new DungeonSession(plugin, targetLocation, bossMechanics, this);
+        this.activeSessions.put(targetLocation, restoredSession);
+
+        // Обновляем блоки данжа, чтобы стереть возможные следы прошлого прерванного сеанса
+        pasteSchematic(targetLocation);
+
+        plugin.getLogger().info("[Dungeon] Успешно восстановлен данж '" + id + "' после рестарта.");
     }
 
     public void pasteSchematic(Location targetLocation) {
@@ -49,7 +86,6 @@ public class DungeonManager {
             plugin.saveResource("schematics/" + schematicName + ".schem", false);
         }
 
-        // Безопасное определение формата без утечки дескрипторов файлов
         ClipboardFormat format = ClipboardFormats.findByFile(schematicFile);
         if (format == null) {
             plugin.getLogger().severe("[Dungeon] Не удалось определить формат схематики: " + schematicFile.getName());
@@ -64,13 +100,12 @@ public class DungeonManager {
 
                 ClipboardHolder holder = new ClipboardHolder(clipboard);
 
-                // ignoreAirBlocks(false) обязателен, чтобы затирать старый дроп/блоки прошлых сессий воздухами
                 Operation operation = holder
                         .createPaste(editSession)
                         .to(BlockVector3.at(targetLocation.getBlockX(), targetLocation.getBlockY(), targetLocation.getBlockZ()))
                         .ignoreAirBlocks(false)
-                        .copyEntities(false) // Оптимизация: не плодим сущности из файла схематики при каждом ресете
-                        .copyBiomes(false)   // Оптимизация: отключаем перезапись биомов чанка
+                        .copyEntities(false)
+                        .copyBiomes(false)
                         .build();
                 Operations.complete(operation);
             }
@@ -81,26 +116,30 @@ public class DungeonManager {
     }
 
     /**
-     * Ищет сессию, к которой принадлежит конкретный игрок (по UUID).
-     * Самый надежный метод для ивентов выхода, смерти и интеракций игрока.
+     * Ищет сессию, к которой принадлежит конкретный игрок.
      */
     public DungeonSession getSessionByPlayer(Player player) {
-        UUID uuid = player.getUniqueId();
-        for (DungeonSession session : activeSessions) {
-            // Метод getPlayers() должен возвращать List<UUID> в DungeonSession
-            // Если он приватный — сделай для него геттер public List<UUID> getPlayersUUID() { return this.players; }
-            if (session.getState() != DungeonSession.State.LOBBY && BukkitAdapter.adapt(player.getLocation().getWorld()) != null) {
-                // Дополнительная проверка, если требуется, но поиска по UUID обычно достаточно:
-            }
-            // Для совместимости с твоим кодом, мы добавим этот метод, но ниже починим и getNearestSession
+        // Сначала ищем по прямому вхождению UUID в сессиях
+        for (DungeonSession session : activeSessions.values()) {
+            // Если в твоем DungeonSession список игроков называется 'players' (List<UUID>):
+            // Проверяем, находится ли игрок внутри этой запущенной сессии
+            try {
+                java.lang.reflect.Field field = session.getClass().getDeclaredField("players");
+                field.setAccessible(true);
+                List<UUID> sessionPlayers = (List<UUID>) field.get(session);
+                if (sessionPlayers != null && sessionPlayers.contains(player.getUniqueId())) {
+                    return session;
+                }
+            } catch (Exception ignored) {}
         }
-        // Чтобы не переписывать твой DungeonSession, реализуем надежный поиск по локации:
+
+        // Фолбэк: если игрок еще не зашел в пати, но кликает по элементам структуры — ищем ближайшую сессию
         return getNearestSession(player.getLocation());
     }
 
     /**
-     * ИСПРАВЛЕНО: Теперь находит РЕАЛЬНО ближайшую сессию по формуле расстояния,
-     * а не возвращает тупо индекс 0.
+     * Находит ближайшую сессию на основе сохраненной карты активных точек.
+     * Работает без рефлексии по прямому итерированию локаций-ключей.
      */
     public DungeonSession getNearestSession(Location loc) {
         if (activeSessions.isEmpty() || loc == null || loc.getWorld() == null) return null;
@@ -108,34 +147,24 @@ public class DungeonManager {
         DungeonSession closest = null;
         double closestDistSq = Double.MAX_VALUE;
 
-        for (DungeonSession session : activeSessions) {
-            // Предполагается, что в DungeonSession есть метод геттера для origin: public Location getOrigin()
-            // Если его нет — добавь: public Location getOrigin() { return this.origin; }
-            Location sessionOrigin = loc.getWorld().getSpawnLocation(); // Фолбэк, если нет геттера
+        for (Map.Entry<Location, DungeonSession> entry : activeSessions.entrySet()) {
+            Location originLoc = entry.getKey();
 
-            // Пытаемся получить доступ к приватному полю через рефлексию или стандартный геттер, если ты его добавишь:
-            // Для стабильности используем геттер, добавь его в DungeonSession: public Location getOrigin() { return origin; }
-            Location originLoc = null;
-            try {
-                java.lang.reflect.Field field = session.getClass().getDeclaredField("origin");
-                field.setAccessible(true);
-                originLoc = (Location) field.get(session);
-            } catch (Exception e) {
-                continue;
-            }
-
-            if (originLoc != null && originLoc.getWorld().equals(loc.getWorld())) {
+            if (originLoc.getWorld().equals(loc.getWorld())) {
                 double distSq = originLoc.distanceSquared(loc);
                 if (distSq < closestDistSq) {
                     closestDistSq = distSq;
-                    closest = session;
+                    closest = entry.getValue();
                 }
             }
         }
         return closest;
     }
 
-    public List<DungeonSession> getActiveSessions() {
-        return activeSessions;
+    /**
+     * Возвращает коллекцию всех запущенных на сервере сессий данжей
+     */
+    public Collection<DungeonSession> getActiveSessions() {
+        return activeSessions.values();
     }
 }

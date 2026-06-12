@@ -16,6 +16,7 @@ import ru.politaboba.serverSystem.faction.model.FactionDepartment;
 import ru.politaboba.serverSystem.faction.model.FactionRank;
 import ru.politaboba.serverSystem.faction.model.FactionPermission;
 import ru.politaboba.serverSystem.faction.manager.PassportManager;
+import ru.politaboba.serverSystem.faction.manager.ChatManager;
 import ru.politaboba.serverSystem.item.ItemFactory;
 
 import java.util.ArrayList;
@@ -25,7 +26,7 @@ import java.util.UUID;
 public class FactionCommand implements CommandExecutor {
 
     private final ServerSystem plugin;
-    private final ItemFactory itemFactory; // Оптимизация: держим фабрику в памяти
+    private final ItemFactory itemFactory;
     private static final java.util.Map<UUID, String> invites = new java.util.HashMap<>();
 
     public FactionCommand(ServerSystem plugin) {
@@ -36,12 +37,11 @@ public class FactionCommand implements CommandExecutor {
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         if (!(sender instanceof Player)) {
-            sender.sendMessage("Команда доступна только игрокам!");
+            sender.sendMessage("§cКоманда доступна только игрокам!");
             return true;
         }
 
         Player player = (Player) sender;
-
         if (args.length == 0) {
             openFactionMenu(player);
             return true;
@@ -49,34 +49,31 @@ public class FactionCommand implements CommandExecutor {
 
         String subCommand = args[0].toLowerCase();
 
-        // Слой 1: Команды, доступные БЕЗ проверки на членство во фракции
         switch (subCommand) {
             case "help": sendHelpMessage(player); return true;
             case "cookbook": executeCookbook(player); return true;
             case "create": executeCreate(player, args); return true;
             case "accept": executeAccept(player); return true;
-            case "list": executeList(player); return true; // Новая команда
-            case "info": executeInfo(player, args); return true; // Новая команда
+            case "list": executeList(player); return true;
+            case "info": executeInfo(player, args); return true;
         }
 
-        // Слой 2: Глобальная проверка наличия фракции для всех остальных действий
         UUID playerUUID = player.getUniqueId();
         String currentFactionName = plugin.getPlayerFactionMap().get(playerUUID);
         if (currentFactionName == null) {
-            player.sendMessage("§cВы не состоите во фракции! Используйте §e/f create <имя>§c или §e/f help");
+            player.sendMessage("§cВы не состоите в государстве! Создайте его: §e/f create <имя>§c или изучите §e/f help");
             return true;
         }
 
         Faction faction = plugin.getFactions().get(currentFactionName);
         if (faction == null) {
-            player.sendMessage("§cОшибка: Ваша фракция не найдена в реестре системы.");
+            player.sendMessage("§cОшибка: Ваше государство отсутствует в реестре системы.");
             return true;
         }
 
-        // Слой 3: Маршрутизация внутрифракционных команд
         switch (subCommand) {
-            case "leave": executeLeave(player, faction); return true; // Новая команда
-            case "disband": executeDisband(player, faction); return true; // Новая команда
+            case "leave": executeLeave(player, faction); return true;
+            case "disband": executeDisband(player, faction); return true;
             case "invite": executeInvite(player, faction, currentFactionName, args); return true;
             case "kick": executeKick(player, faction, currentFactionName, args); return true;
             case "balance": executeBalance(player, faction); return true;
@@ -88,19 +85,25 @@ public class FactionCommand implements CommandExecutor {
             case "passport": executePassport(player, faction, currentFactionName, args); return true;
             case "addenemy": executeAddEnemy(player, faction, currentFactionName, args); return true;
             case "color": executeColor(player, faction, args); return true;
+            case "chat": executeChat(player, currentFactionName); return true;
         }
 
         player.sendMessage("§cНеизвестная подкоманда. Используйте §e/f help");
         return true;
     }
 
-    // =========================================================================
-    // ЛОГИКА ПОДКОМАНД (ВЫНЕСЕНА В ОДДЕЛЬНЫЕ МЕТОДЫ)
-    // =========================================================================
+    private void executeChat(Player player, String factionName) {
+        plugin.getChatManager().toggleChatMode(player.getUniqueId());
+        ChatManager.ChatMode newMode = plugin.getChatManager().getChatMode(player.getUniqueId());
 
+        if (newMode == ChatManager.ChatMode.FACTION) {
+            player.sendMessage("§a[РАДИО] Вы подключились к зашифрованной частоте фракции §e" + factionName + "§a. Сообщения видят только союзники.");
+        } else {
+            player.sendMessage("§7[ЧАТ] Вы вернулись на открытую локальную частоту (радиус 50 блоков).");
+        }
+    }
 
     private void executeColor(Player player, Faction faction, String[] args) {
-        // Проверяем, является ли игрок лидером фракции
         if (!player.getUniqueId().equals(faction.getLeader())) {
             player.sendMessage("§cТолько Верховный Лидер государства может менять его официальный цвет!");
             return;
@@ -115,27 +118,17 @@ public class FactionCommand implements CommandExecutor {
         String inputColor = args[1].toUpperCase();
         org.bukkit.ChatColor chosenColor;
 
-        // Валидация введенного цвета, чтобы сервер не упал от неверного текста
         try {
             chosenColor = org.bukkit.ChatColor.valueOf(inputColor);
-
-            // Запрещаем технические или нечитаемые цвета (например, черный, жирный, подчеркнутый)
-            if (chosenColor.isFormat() || chosenColor == org.bukkit.ChatColor.BLACK) {
-                throw new IllegalArgumentException();
-            }
+            if (chosenColor.isFormat() || chosenColor == org.bukkit.ChatColor.BLACK) throw new IllegalArgumentException();
         } catch (IllegalArgumentException e) {
-            player.sendMessage("§cНеверный цвет! Выберите из списка: §fRED, GREEN, AQUA, YELLOW, LIGHT_PURPLE, GOLD, GRAY, BLUE");
+            player.sendMessage("§cНеверный цвет! Выберите: §fRED, GREEN, AQUA, YELLOW, LIGHT_PURPLE, GOLD, GRAY, BLUE");
             return;
         }
 
-        // Предполагается, что в твоем классе Faction есть метод setFactionColor(ChatColor color)
-        // Если метод называется по-другому, подправь под свою модель.
         faction.setFactionColor(chosenColor);
-
-        // Принудительно обновляем префиксы в Табе и Скорборде над головой для всех игроков
         plugin.updateAllPlayersDisplay();
-
-        player.sendMessage("§a[Реестр] Официальный цвет вашего государства успешно изменен на " + chosenColor + chosenColor.name() + "§a!");
+        player.sendMessage("§a[Реестр] Официальный цвет государства изменен на " + chosenColor + chosenColor.name() + "§a!");
     }
 
     private void executeCookbook(Player player) {
@@ -144,7 +137,7 @@ public class FactionCommand implements CommandExecutor {
             return;
         }
         player.getInventory().addItem(itemFactory.createCookbook());
-        player.sendMessage("§aВы успешно выдали себе §6Кулинарную Книгу Рецептов§a!");
+        player.sendMessage("§aВы выдали себе §6Кулинарную Книгу Рецептов§a!");
     }
 
     private void executeCreate(Player player, String[] args) {
@@ -156,7 +149,7 @@ public class FactionCommand implements CommandExecutor {
         String factionName = args[1];
 
         if (plugin.getPlayerFactionMap().containsKey(playerUUID)) {
-            player.sendMessage("§cВы уже состоите во фракции!");
+            player.sendMessage("§cВы уже состоите в государстве!");
             return;
         }
         if (plugin.getFactions().containsKey(factionName)) {
@@ -169,7 +162,7 @@ public class FactionCommand implements CommandExecutor {
         plugin.getPlayerFactionMap().put(playerUUID, factionName);
 
         plugin.updateAllPlayersDisplay();
-        player.sendMessage("§aФракция §e" + factionName + " §aуспешно создана!");
+        player.sendMessage("§aГосударство §e" + factionName + " §aуспешно создано!");
     }
 
     private void executeAccept(Player player) {
@@ -182,13 +175,13 @@ public class FactionCommand implements CommandExecutor {
 
         String targetFactionName = invites.get(playerUUID);
         if (targetFactionName == null) {
-            player.sendMessage("§cУ вас нет активных приглашений в государства.");
+            player.sendMessage("§cУ вас нет активных приглашений.");
             return;
         }
 
         Faction targetFaction = plugin.getFactions().get(targetFactionName);
         if (targetFaction == null) {
-            player.sendMessage("§cОшибка: Государство, в которое вас звали, распалось.");
+            player.sendMessage("§cОшибка: Пригласившее вас государство распалось.");
             invites.remove(playerUUID);
             return;
         }
@@ -198,30 +191,30 @@ public class FactionCommand implements CommandExecutor {
         invites.remove(playerUUID);
 
         plugin.updateAllPlayersDisplay();
-        player.sendMessage("§aВы успешно приняли приглашение и вступили в §e" + targetFactionName + "§a!");
+        player.sendMessage("§aВы успешно приняли присягу и вступили в §e" + targetFactionName + "§a!");
 
         for (UUID memberUUID : targetFaction.getMembers()) {
             Player member = Bukkit.getPlayer(memberUUID);
             if (member != null && member.isOnline()) {
-                member.sendMessage("§6[Реестр] Гражданин §e" + player.getName() + " §aпринял присягу и вступил в наши ряды!");
+                member.sendMessage("§6[Реестр] Гражданин §e" + player.getName() + " §aвступил в наши ряды!");
             }
         }
     }
 
     private void executeList(Player player) {
-        player.sendMessage("§6▬▬▬▬▬▬▬▬▬ §l[ РЕЕСТР ФРАКЦИЙ СЕРВЕРА ] §6▬▬▬▬▬▬▬▬▬");
+        player.sendMessage("§6▬▬▬▬▬▬▬▬▬ §l[ РЕЕСТР ВСЕХ ГОСУДАРСТВ ] §6▬▬▬▬▬▬▬▬▬");
         if (plugin.getFactions().isEmpty()) {
             player.sendMessage("§7На сервере пока нет созданных государств.");
             return;
         }
         for (Faction f : plugin.getFactions().values()) {
-            player.sendMessage("§7• §b" + f.getName() + " §e| §7Граждан: §a" + f.getMembers().size() + " §e| §7Лидер: §6" + Bukkit.getOfflinePlayer(f.getLeader()).getName());
+            player.sendMessage("§7• " + f.getFactionColor() + f.getName() + " §e| §7Население: §a" + f.getMembers().size() + " чел. §e| §7Лидер: §6" + Bukkit.getOfflinePlayer(f.getLeader()).getName());
         }
     }
 
     private void executeInfo(Player player, String[] args) {
         if (args.length < 2) {
-            player.sendMessage("§cИспользование: /f info <Название Государства>");
+            player.sendMessage("§cИспользование: /f info <Название>");
             return;
         }
         Faction target = plugin.getFactions().get(args[1]);
@@ -229,16 +222,16 @@ public class FactionCommand implements CommandExecutor {
             player.sendMessage("§cГосударство с таким названием не найдено.");
             return;
         }
-        player.sendMessage("§6=== Государева справка: §b" + target.getName() + " §6===");
+        player.sendMessage("§6=== Государственная справка: " + target.getFactionColor() + target.getName() + " §6===");
         player.sendMessage("§eВерховный Лидер: §f" + Bukkit.getOfflinePlayer(target.getLeader()).getName());
         player.sendMessage("§eЧисленность населения: §a" + target.getMembers().size() + " чел.");
-        player.sendMessage("§eКоличество ведомств: §f" + target.getDepartments().size());
+        player.sendMessage("§eДействующих министерств: §f" + target.getDepartments().size());
     }
 
     private void executeLeave(Player player, Faction faction) {
         UUID playerUUID = player.getUniqueId();
         if (playerUUID.equals(faction.getLeader())) {
-            player.sendMessage("§cЛидер не может покинуть государство! Сначала передайте пост или распустите его через §e/f disband");
+            player.sendMessage("§cЛидер не может покинуть государство! Передайте пост или распустите его через §e/f disband");
             return;
         }
 
@@ -246,11 +239,11 @@ public class FactionCommand implements CommandExecutor {
         plugin.getPlayerFactionMap().remove(playerUUID);
         plugin.updateAllPlayersDisplay();
 
-        player.sendMessage("§cВы добровольно покинули ряды государства §e" + faction.getName() + "§c и снова стали скитальцем.");
+        player.sendMessage("§cВы добровольно покинули фракцию и снова стали свободным скитальцем.");
         for (UUID memberUUID : faction.getMembers()) {
             Player member = Bukkit.getPlayer(memberUUID);
             if (member != null && member.isOnline()) {
-                member.sendMessage("§7[Реестр] §e" + player.getName() + " §7оформил эмиграцию и покинул нашу страну.");
+                member.sendMessage("§7[Реестр] §e" + player.getName() + " §7оформил эмиграцию и покинул страну.");
             }
         }
     }
@@ -262,8 +255,6 @@ public class FactionCommand implements CommandExecutor {
         }
 
         String factionName = faction.getName();
-
-        // Оповещаем и исключаем всех граждан
         for (UUID memberUUID : faction.getMembers()) {
             plugin.getPlayerFactionMap().remove(memberUUID);
             Player member = Bukkit.getPlayer(memberUUID);
@@ -274,7 +265,7 @@ public class FactionCommand implements CommandExecutor {
 
         plugin.getFactions().remove(factionName);
         plugin.updateAllPlayersDisplay();
-        player.sendMessage("§aВы успешно распустили империю §e" + factionName + "§a. История окончена.");
+        player.sendMessage("§aВы успешно распустили фракцию §e" + factionName + "§a. История окончена.");
     }
 
     private void executeInvite(Player player, Faction faction, String factionName, String[] args) {
@@ -283,11 +274,8 @@ public class FactionCommand implements CommandExecutor {
             return;
         }
         UUID playerUUID = player.getUniqueId();
-        boolean isLeader = playerUUID.equals(faction.getLeader());
-        boolean hasInvitePerm = faction.hasPermission(playerUUID, FactionPermission.INVITE);
-
-        if (!isLeader && !hasInvitePerm) {
-            player.sendMessage("§cУ вас нет прав на приглашение людей!");
+        if (!playerUUID.equals(faction.getLeader()) && !faction.hasPermission(playerUUID, FactionPermission.INVITE)) {
+            player.sendMessage("§cУ вашей должности нет прав на приглашение людей!");
             return;
         }
 
@@ -302,14 +290,13 @@ public class FactionCommand implements CommandExecutor {
             player.sendMessage("§cЭтот игрок уже состоит в каком-то государстве!");
             return;
         }
-
         if (faction.isBlacklisted(targetUUID)) {
-            player.sendMessage("§cЭтот игрок находится в ЧС государства!");
+            player.sendMessage("§cЭтот игрок находится в Черном Списке этого государства!");
             return;
         }
 
         invites.put(targetUUID, factionName);
-        player.sendMessage("§aПриглашение отправлено игроку §e" + target.getName() + "§a.");
+        player.sendMessage("§aПриглашение успешно отправлено игроку §e" + target.getName() + "§a.");
 
         target.sendMessage(" ");
         target.sendMessage("§6★ Вас приглашают вступить в государство §b" + factionName + "§6!");
@@ -324,9 +311,8 @@ public class FactionCommand implements CommandExecutor {
         }
         UUID playerUUID = player.getUniqueId();
         boolean isLeader = playerUUID.equals(faction.getLeader());
-        boolean hasKickPerm = faction.hasPermission(playerUUID, FactionPermission.KICK);
 
-        if (!isLeader && !hasKickPerm) {
+        if (!isLeader && !faction.hasPermission(playerUUID, FactionPermission.KICK)) {
             player.sendMessage("§cВаша должность не имеет полномочий исключать граждан!");
             return;
         }
@@ -339,12 +325,10 @@ public class FactionCommand implements CommandExecutor {
             player.sendMessage("§cЭтот игрок не является гражданином вашего государства!");
             return;
         }
-
         if (targetUUID.equals(faction.getLeader())) {
             player.sendMessage("§cНельзя исключить Верховного Лидера!");
             return;
         }
-
         if (targetUUID.equals(playerUUID)) {
             player.sendMessage("§cВы не можете кикнуть самого себя.");
             return;
@@ -353,7 +337,7 @@ public class FactionCommand implements CommandExecutor {
         if (!isLeader) {
             for (FactionDepartment dept : faction.getDepartments().values()) {
                 if (targetUUID.equals(dept.getDepartmentHead())) {
-                    player.sendMessage("§cВы не можете исключить Главу Ведомства! Это может сделать только Лидер.");
+                    player.sendMessage("§cВы не можете исключить Главу Ведомства! Это доступно только Лидеру.");
                     return;
                 }
             }
@@ -363,14 +347,14 @@ public class FactionCommand implements CommandExecutor {
         plugin.getPlayerFactionMap().remove(targetUUID);
         plugin.updateAllPlayersDisplay();
 
-        player.sendMessage("§aГражданин §e" + target.getName() + " §cбыл позорно изгнан!");
+        player.sendMessage("§aГражданин §e" + target.getName() + " §cбыл изгнан из государства.");
         if (target.isOnline() && target.getPlayer() != null) {
             target.getPlayer().sendMessage("§c§lВы были исключены из государства §e" + currentFactionName + "§c!");
         }
     }
 
     private void executeBalance(Player player, Faction faction) {
-        player.sendMessage("§6[Казна] §eБаланс бюджета §b" + faction.getName() + "§e: §a" + faction.getDiamondBank() + " алмазов§e.");
+        player.sendMessage("§6[Казна] §eТекущий баланс бюджета §b" + faction.getName() + "§e: §a" + faction.getDiamondBank() + " алмазов§e.");
     }
 
     private void executeDeposit(Player player, Faction faction, String[] args) {
@@ -388,13 +372,13 @@ public class FactionCommand implements CommandExecutor {
         }
 
         if (!hasEnoughDiamonds(player, amount)) {
-            player.sendMessage("§cУ вас нет столько алмазов в инвентаре!");
+            player.sendMessage("§cУ вас нет такого количества алмазов в инвентаре!");
             return;
         }
 
         removeDiamonds(player, amount);
         faction.deposit(amount);
-        player.sendMessage("§aВы успешно внесли §b" + amount + " алмазов §aв казну!");
+        player.sendMessage("§aВы успешно внесли §b" + amount + " алмазов §aв государственную казну!");
     }
 
     private void executeWithdraw(Player player, Faction faction, String[] args) {
@@ -451,7 +435,6 @@ public class FactionCommand implements CommandExecutor {
             dept.addRank(new FactionRank(rankName));
             player.sendMessage("§aДобавлена должность §d" + rankName + " §aв ведомство §b" + dept.getName());
         }
-
         else if (rankAction.equals("remove") && args.length > 3) {
             if (!playerUUID.equals(faction.getLeader())) {
                 player.sendMessage("§cТолько Верховный Лидер удаляет должности!");
@@ -467,9 +450,8 @@ public class FactionCommand implements CommandExecutor {
                 return;
             }
             dept.removeRank(rankName);
-            player.sendMessage("§aДолжность удалена.");
+            player.sendMessage("§aДолжность успешно удалена.");
         }
-
         else if (rankAction.equals("perm") && args.length > 5) {
             String permAction = args[2].toLowerCase();
             String deptName = args[3].toLowerCase();
@@ -548,7 +530,6 @@ public class FactionCommand implements CommandExecutor {
             return;
         }
         String deptName = args[2].toLowerCase();
-        String rankName = args[3];
 
         if (!faction.getDepartments().containsKey(deptName)) {
             player.sendMessage("§cТакого ведомства не существует!");
@@ -566,11 +547,11 @@ public class FactionCommand implements CommandExecutor {
         Player target = Bukkit.getPlayer(args[1]);
         if (target == null || !target.isOnline()) return;
 
-        faction.assignPlayer(target.getUniqueId(), args[2], rankName);
+        faction.assignPlayer(target.getUniqueId(), args[2], args[3]);
         plugin.getPlayerFactionMap().put(target.getUniqueId(), currentFactionName);
         plugin.updateAllPlayersDisplay();
 
-        player.sendMessage("§aКадры обновлены.");
+        player.sendMessage("§aКадровые списки успешно обновлены.");
     }
 
     private void executePassport(Player player, Faction faction, String currentFactionName, String[] args) {
@@ -578,7 +559,7 @@ public class FactionCommand implements CommandExecutor {
 
         if (args.length > 1) {
             if (!faction.hasPermission(player.getUniqueId(), FactionPermission.ISSUE_PASSPORT)) {
-                player.sendMessage("§cВаша должность не уполномочена выписывать документы!");
+                player.sendMessage("§cВаша должность не уполномочена выписывать документы третьим лицам!");
                 return;
             }
             Player target = Bukkit.getPlayer(args[1]);
@@ -587,11 +568,10 @@ public class FactionCommand implements CommandExecutor {
             String targetFaction = plugin.getPlayerFactionMap().get(target.getUniqueId());
             String targetRole = "Скиталец";
             if (targetFaction != null) {
-                targetRole = plugin.getFactions().get(targetFaction).getPlayerInfoString(target.getUniqueId())
-                        .replaceAll("§[0-9a-fk-or]", "");
+                targetRole = plugin.getFactions().get(targetFaction).getPlayerInfoString(target.getUniqueId()).replaceAll("§[0-9a-fk-or]", "");
             }
             player.getInventory().addItem(passportManager.createPassport(target, targetFaction, targetRole));
-            player.sendMessage("§aВы оформили паспорт гражданину.");
+            player.sendMessage("§aВы успешно оформили паспорт гражданину.");
             return;
         }
 
@@ -606,7 +586,6 @@ public class FactionCommand implements CommandExecutor {
 
         Player target = Bukkit.getPlayer(args[1]);
         if (target == null || !target.isOnline()) return;
-
         if (faction.getMembers().contains(target.getUniqueId())) return;
 
         faction.addToBlacklist(target.getUniqueId());
@@ -616,7 +595,6 @@ public class FactionCommand implements CommandExecutor {
         target.sendMessage("§cГосударство §e" + currentFactionName + " §cобъявило вас врагом народа!");
     }
 
-    // --- Дальнейшие вспомогательные методы (hasEnoughDiamonds, removeDiamonds, openFactionMenu, sendHelpMessage) остаются без изменений ---
     private boolean hasEnoughDiamonds(Player player, int amount) {
         int count = 0;
         for (ItemStack item : player.getInventory().getContents()) {
@@ -643,13 +621,33 @@ public class FactionCommand implements CommandExecutor {
             }
         }
         player.getInventory().setContents(contents);
+        player.updateInventory(); // ИСПРАВЛЕН ВИЗУАЛЬНЫЙ ДЕСИНК СТАКА
+    }
+
+    // Вспомогательный метод определения цвета панели на основе цвета государства
+    private Material getStainedGlassPaneByColor(org.bukkit.ChatColor color) {
+        if (color == null) return Material.GRAY_STAINED_GLASS_PANE;
+        switch (color) {
+            case RED: return Material.RED_STAINED_GLASS_PANE;
+            case GREEN: return Material.GREEN_STAINED_GLASS_PANE;
+            case AQUA: return Material.LIGHT_BLUE_STAINED_GLASS_PANE;
+            case YELLOW: return Material.YELLOW_STAINED_GLASS_PANE;
+            case LIGHT_PURPLE: return Material.PINK_STAINED_GLASS_PANE;
+            case GOLD: return Material.ORANGE_STAINED_GLASS_PANE;
+            case BLUE: return Material.BLUE_STAINED_GLASS_PANE;
+            default: return Material.GRAY_STAINED_GLASS_PANE;
+        }
     }
 
     private void openFactionMenu(Player player) {
         Inventory gui = Bukkit.createInventory(null, 27, "§0Государственный Аппарат");
         UUID uuid = player.getUniqueId();
+        String factionName = plugin.getPlayerFactionMap().get(uuid);
+        Faction faction = factionName != null ? plugin.getFactions().get(factionName) : null;
 
-        ItemStack pane = new ItemStack(Material.GRAY_STAINED_GLASS_PANE);
+        // ВИЗУАЛЬНОЕ ОБНОВЛЕНИЕ: Заливка рамки цветом фракции!
+        org.bukkit.ChatColor fColor = (faction != null) ? faction.getFactionColor() : org.bukkit.ChatColor.GRAY;
+        ItemStack pane = new ItemStack(getStainedGlassPaneByColor(fColor));
         ItemMeta paneMeta = pane.getItemMeta();
         if (paneMeta != null) {
             paneMeta.setDisplayName(" ");
@@ -662,10 +660,10 @@ public class FactionCommand implements CommandExecutor {
         ItemStack helpItem = new ItemStack(Material.KNOWLEDGE_BOOK);
         ItemMeta helpMeta = helpItem.getItemMeta();
         if (helpMeta != null) {
-            helpMeta.setDisplayName("§b❓ Справка по командам");
+            helpMeta.setDisplayName("§b❓ Справка по законам");
             List<String> lore = new ArrayList<>();
-            lore.add("§7Нажмите, чтобы закрыть меню и");
-            lore.add("§7посмотреть список команд в чате.");
+            lore.add("§7Нажмите, чтобы закрыть ведомство");
+            lore.add("§7и отобразить справку в чате.");
             lore.add("");
             lore.add("§eИспользуйте: §f/f help");
             helpMeta.setLore(lore);
@@ -673,38 +671,35 @@ public class FactionCommand implements CommandExecutor {
         }
         gui.setItem(8, helpItem);
 
-        if (!plugin.getPlayerFactionMap().containsKey(uuid)) {
+        if (faction == null) {
             ItemStack createBtn = new ItemStack(Material.WHITE_BANNER);
             ItemMeta meta = createBtn.getItemMeta();
             if (meta != null) {
-                meta.setDisplayName("§a✨ Создать новое Государство");
+                meta.setDisplayName("§a✨ Основать Государство");
                 List<String> lore = new ArrayList<>();
-                lore.add("§7Вы сейчас являетесь свободным скитальцем.");
-                lore.add("§7Оснуйте свою фракцию и начните");
-                lore.add("§7развивать политическую структуру!");
+                lore.add("§7Вы — вольный скиталец.");
+                lore.add("§7Отыщите соратников, соберите земли");
+                lore.add("§7и постройте новую империю!");
                 lore.add("");
-                lore.add("§eКоманда: §f/f create <Название>");
+                lore.add("§eКоманда: §f/f create <Имя>");
                 meta.setLore(lore);
                 createBtn.setItemMeta(meta);
             }
             gui.setItem(13, createBtn);
         } else {
-            String factionName = plugin.getPlayerFactionMap().get(uuid);
-            Faction faction = plugin.getFactions().get(factionName);
-
             ItemStack info = new ItemStack(Material.BOOK);
             ItemMeta infoMeta = info.getItemMeta();
             if (infoMeta != null) {
-                infoMeta.setDisplayName("§eГосударство: §6" + factionName);
+                infoMeta.setDisplayName("§eГосударство: " + faction.getFactionColor() + factionName);
                 List<String> lore = new ArrayList<>();
-                lore.add("§7Гражден в реестре: §a" + (faction.getMembers() != null ? faction.getMembers().size() : 1));
-                lore.add("§7Верховный Лидер: §a" + Bukkit.getOfflinePlayer(faction.getLeader()).getName());
+                lore.add("§7● Граждан в реестре: §a" + faction.getMembers().size());
+                lore.add("§7● Правитель: §6" + Bukkit.getOfflinePlayer(faction.getLeader()).getName());
                 lore.add("");
-                lore.add("§7Ваш текущий статус:");
+                lore.add("§7Ваше текущее положение:");
                 lore.add(" " + faction.getPlayerInfoString(uuid));
                 lore.add("");
-                lore.add("§b👉 Напишите §f/f passport§b, чтобы получить");
-                lore.add("§b   бумажный документ с этой информацией.");
+                lore.add("§b» Нажмите §f/f passport§b, дабы");
+                lore.add("§b   получить бумажный документ.");
                 infoMeta.setLore(lore);
                 info.setItemMeta(infoMeta);
             }
@@ -713,13 +708,13 @@ public class FactionCommand implements CommandExecutor {
             ItemStack bank = new ItemStack(Material.DIAMOND);
             ItemMeta bankMeta = bank.getItemMeta();
             if (bankMeta != null) {
-                bankMeta.setDisplayName("§6💰 Nationale Казна");
+                bankMeta.setDisplayName("§6💰 Национальная Казна");
                 List<String> lore = new ArrayList<>();
-                lore.add("§7Финансовые резервы in алмазах.");
+                lore.add("§7Финансовый суверенитет страны.");
                 lore.add("");
-                lore.add("§7Баланс бюджета: §a" + faction.getDiamondBank() + " 💎");
+                lore.add("§7Резервы бюджета: §a" + faction.getDiamondBank() + " 💎");
                 lore.add("");
-                lore.add("§7Действия в чате:");
+                lore.add("§7Управление через консоль чата:");
                 lore.add(" §e/f deposit <кол-во> §7— Пополнить казну");
                 lore.add(" §e/f withdraw <кол-во> §7— Снять (нужны права)");
                 bankMeta.setLore(lore);
@@ -730,28 +725,27 @@ public class FactionCommand implements CommandExecutor {
             ItemStack structure = new ItemStack(Material.COMPASS);
             ItemMeta structMeta = structure.getItemMeta();
             if (structMeta != null) {
-                structMeta.setDisplayName("§b🏢 Министерства и Ведомства");
+                structMeta.setDisplayName("§b🏢 Гос. Аппарат и Ведомства");
                 List<String> lore = new ArrayList<>();
-                lore.add("§7Активные категории гос. аппарата:");
+                lore.add("§7Действующие категории структур:");
 
                 if (faction.getDepartments() != null && !faction.getDepartments().isEmpty()) {
                     for (String dept : faction.getDepartments().keySet()) {
                         FactionDepartment d = faction.getDepartments().get(dept);
                         if (d != null) {
-                            String headName = d.getDepartmentHead() != null ?
-                                    Bukkit.getOfflinePlayer(d.getDepartmentHead()).getName() : "Не назначен";
+                            String headName = d.getDepartmentHead() != null ? Bukkit.getOfflinePlayer(d.getDepartmentHead()).getName() : "Не назначен";
                             lore.add(" §7• §f" + d.getName() + " §7(Глава: §e" + headName + "§7)");
                         }
                     }
                 } else {
-                    lore.add(" §7• §cНет active ведомств");
+                    lore.add(" §7• §cНет активных структур");
                 }
 
                 lore.add("");
-                lore.add("§7Управление (Для Лидеров):");
+                lore.add("§7Управление (Для Руководства):");
                 lore.add(" §e/f dept create <Имя> §7— Открыть ведомство");
-                lore.add(" §e/f dept head <Ведомство> <Ник> §7— Назначить министра");
-                lore.add(" §e/f assign <Ник> <Ведомство> <Ранг> §7— Выдать должность");
+                lore.add(" §e/f dept head <Ведомство> <Ник> §7— Назначить главу");
+                lore.add(" §e/f assign <Ник> <Ведомство> <Ранг> §7— Повысить сотрудника");
                 structMeta.setLore(lore);
                 structure.setItemMeta(structMeta);
             }
@@ -762,13 +756,13 @@ public class FactionCommand implements CommandExecutor {
             if (diploMeta != null) {
                 diploMeta.setDisplayName("§c🛡️ Безопасность и Черный Список");
                 List<String> lore = new ArrayList<>();
-                lore.add("§7Игроки в ЧС подсвечиваются красным");
-                lore.add("§7цветом на государственном уровне.");
+                lore.add("§7Игроки из этого реестра объявляются");
+                lore.add("§7официальными врагами государства.");
                 lore.add("");
                 lore.add("§7Всего врагов народа: §c" + (faction.getBlacklist() != null ? faction.getBlacklist().size() : 0));
                 lore.add("");
-                lore.add("§7Управление:");
-                lore.add(" §e/f addenemy <Ник> §7— Объявить врагом");
+                lore.add("§7Действие:");
+                lore.add(" §e/f addenemy <Ник> §7— Внести в ЧС");
                 diploMeta.setLore(lore);
                 diplo.setItemMeta(diploMeta);
             }
@@ -780,23 +774,24 @@ public class FactionCommand implements CommandExecutor {
 
     private void sendHelpMessage(Player p) {
         p.sendMessage(" ");
-        p.sendMessage("§6▬▬▬▬▬▬▬▬▬ §l[ СИСТЕМА СЕРВЕРА: ПОЛНАЯ СПРАВКА ] §6▬▬▬▬▬▬▬▬▬");
-        p.sendMessage("§b👑 ВЕЛИКИЕ ГОСУДАРСТВА И ФРАКЦИИ:");
-        p.sendMessage(" §e/f §7— Открыть графическое меню гос. аппарата");
-        p.sendMessage(" §e/f list §7— Список всех государств на сервере");
-        p.sendMessage(" §e/f info <Имя> §7— Посмотреть информацию о чужой стране");
-        p.sendMessage(" §e/f leave §7— Эмигрировать (покинуть государство)");
-        p.sendMessage(" §e/f disband §7— Полностью уничтожить свою фракцию (Лидер)");
-        p.sendMessage(" §e/f create <Имя> §7— Основать новое независимое государство");
-        p.sendMessage(" §e/f invite <Ник> §7— Пригласить жителя в государство");
-        p.sendMessage(" §e/f accept §7— Принять активное приглашение");
-        p.sendMessage(" §e/f kick <Ник> §7— Выгнать человека из фракции");
-        p.sendMessage(" §e/f passport [Ник] §7— Распечатать бумажный паспорт гражданина");
+        p.sendMessage("§6▬▬▬▬▬▬▬▬▬ §l[ ГОСУДАРСТВЕННЫЙ СВОД ЗАКОНОВ ] §6▬▬▬▬▬▬▬▬▬");
+        p.sendMessage("§b👑 ВЕЛИКИЕ НАЦИИ И ФРАКЦИИ:");
+        p.sendMessage(" §e/f §7— Открыть графическую панель гос. аппарата");
+        p.sendMessage(" §e/f chat §7— Подключиться к закрытой рации фракции");
+        p.sendMessage(" §e/f list §7— Список всех стран мира");
+        p.sendMessage(" §e/f info <Имя> §7— Посмотреть реестр чужой страны");
+        p.sendMessage(" §e/f leave §7— Написать отказ от гражданства (эмиграция)");
+        p.sendMessage(" §e/f disband §7— Полностью упразднить страну (Лидер)");
+        p.sendMessage(" §e/f create <Имя> §7— Основать суверенное государство");
+        p.sendMessage(" §e/f invite <Ник> §7— Отправить приглашение жителю");
+        p.sendMessage(" §e/f accept §7— Подписать присягу (принять инвайт)");
+        p.sendMessage(" §e/f kick <Ник> §7— Депортировать человека из страны");
+        p.sendMessage(" §e/f passport [Ник] §7— Печать официального документа");
         p.sendMessage(" ");
         p.sendMessage("§6💰 НАЦИОНАЛЬНЫЙ БАНК (КАЗНА):");
-        p.sendMessage(" §e/f balance §7— Проверить баланс алмазов в казне");
-        p.sendMessage(" §e/f deposit <число> §7— Сдать свои личные алмазы в гос. бюджет");
-        p.sendMessage(" §e/f withdraw <число> §7— Снять алмазы из бюджета");
+        p.sendMessage(" §e/f balance §7— Проверить золотовалютные резервы казны");
+        p.sendMessage(" §e/f deposit <число> §7— Сдать личные сбережения в бюджет");
+        p.sendMessage(" §e/f withdraw <число> §7— Изъять средства из бюджета фракции");
         p.sendMessage(" ");
         p.sendMessage("§6▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬");
     }

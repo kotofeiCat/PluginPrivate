@@ -26,15 +26,14 @@ public class ContractTabCompleter implements TabCompleter {
         List<String> completions = new ArrayList<>();
 
         if (args.length == 1) {
-            return filter(Arrays.asList("list", "send", "terminate"), args[0]);
+            return filter(Arrays.asList("list", "send", "terminate", "review"), args[0]);
         }
 
         if (args.length == 2) {
             if (args[0].equalsIgnoreCase("send")) {
-                return null; // Возвращает список игроков онлайн автоматически
+                return null;
             }
             if (args[0].equalsIgnoreCase("terminate")) {
-                // Подсказываем ID всех существующих контрактов
                 List<String> activeIds = plugin.getAgreements().stream()
                         .map(Agreement::getId)
                         .collect(Collectors.toList());

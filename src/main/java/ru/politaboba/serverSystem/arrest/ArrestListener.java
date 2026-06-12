@@ -10,20 +10,37 @@ import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.inventory.InventoryOpenEvent;
 import org.bukkit.event.player.PlayerCommandPreprocessEvent;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.ItemStack;
 import ru.politaboba.serverSystem.ServerSystem;
 import ru.politaboba.serverSystem.faction.model.Faction;
 
+import java.util.Arrays;
+import java.util.List;
 import java.util.UUID;
 
 public class ArrestListener implements Listener {
 
     private final ArrestManager arrestManager;
-    private final ServerSystem plugin; // Добавляем ссылку на плагин для проверки ЧС и Охоты
+    private final ServerSystem plugin;
 
     public ArrestListener(ArrestManager arrestManager, ServerSystem plugin) {
         this.arrestManager = arrestManager;
         this.plugin = plugin;
+    }
+
+    @EventHandler
+    public void onPlayerQuit(PlayerQuitEvent event) {
+        Player player = event.getPlayer();
+        UUID playerUUID = player.getUniqueId();
+
+        // Если выходит сам арестованный, снимаем с него статус во избежание вечного сохранения эффектов в файлах мира
+        if (arrestManager.isArrested(playerUUID)) {
+            arrestManager.releasePlayer(player);
+        }
+
+        // Если выходит коп, освобождаем тех, кого он вел
+        arrestManager.releaseVictimsOfCop(playerUUID);
     }
 
     @EventHandler
@@ -33,7 +50,6 @@ public class ArrestListener implements Listener {
         Player attacker = (Player) event.getDamager();
         Player victim = (Player) event.getEntity();
 
-        // Запрещаем закованному игроку атаковать кого-либо
         if (arrestManager.isArrested(attacker.getUniqueId())) {
             event.setCancelled(true);
             return;
@@ -41,14 +57,12 @@ public class ArrestListener implements Listener {
 
         ItemStack item = attacker.getInventory().getItemInMainHand();
 
-        // Проверяем удар кандалами
         if (item.getType() == Material.IRON_BARS && item.hasItemMeta() && item.getItemMeta().getDisplayName().equals("§c§lКандалы")) {
-            event.setCancelled(true); // Отменяем ванильный урон
+            event.setCancelled(true);
 
             UUID victimUUID = victim.getUniqueId();
             UUID attackerUUID = attacker.getUniqueId();
 
-            // Если игрок уже арестован этим копом — освобождаем его
             if (arrestManager.isArrested(victimUUID)) {
                 if (attackerUUID.equals(arrestManager.getCop(victimUUID))) {
                     arrestManager.releasePlayer(victim);
@@ -57,11 +71,9 @@ public class ArrestListener implements Listener {
                 return;
             }
 
-            // --- ИНТЕГРАЦИЯ С ОХОТОЙ ЗА ГОЛОВАМИ И ЧС ФРАКЦИЙ ---
             boolean isWantedByBounty = plugin.getBountyOrders().containsKey(victimUUID);
             boolean isFactionEnemy = false;
 
-            // Проверяем, является ли жертва врагом фракции нападающего
             String attackerFactionName = plugin.getPlayerFactionMap().get(attackerUUID);
             if (attackerFactionName != null) {
                 Faction attackerFaction = plugin.getFactions().get(attackerFactionName);
@@ -72,18 +84,14 @@ public class ArrestListener implements Listener {
                 }
             }
 
-            // Условие ареста: Сниженное HP ИЛИ на игрока объявлена охота ИЛИ игрок в ЧС нашей фракции
             if (victim.getHealth() <= 8.0 || isWantedByBounty || isFactionEnemy) {
-
                 arrestManager.arrestPlayer(victim, attacker);
 
-                // Выводим РП-сообщение о причине мгновенного ареста без сопротивления
                 if (isWantedByBounty) {
                     attacker.sendMessage("§6[Охота] На игрока объявлен розыск! Вы мгновенно сковали его, несмотря на сопротивление.");
                 } else if (isFactionEnemy) {
                     attacker.sendMessage("§c[Реестр] Этот преступник находится в ЧС твоего государства! Он арестован без права на сопротивление.");
                 }
-
             } else {
                 attacker.sendMessage("§cЖертва слишком сильно сопротивляется! Сначала ослабьте её (нужно меньше 4 сердец).");
                 attacker.sendMessage("§7Примечание: Мгновенно арестовать можно только преступников из ЧС фракции или целей из /bounty.");
@@ -91,7 +99,6 @@ public class ArrestListener implements Listener {
         }
     }
 
-    // Запрещаем закованному взаимодействовать (вести на поводке при клике ПКМ)
     @EventHandler
     public void onPlayerInteract(PlayerInteractEntityEvent event) {
         if (!(event.getRightClicked() instanceof Player)) return;
@@ -104,7 +111,6 @@ public class ArrestListener implements Listener {
         }
     }
 
-    // ОГРАНИЧЕНИЯ ДЛЯ АРЕСТОВАННОГО
     @EventHandler
     public void onBlockBreak(BlockBreakEvent event) {
         if (arrestManager.isArrested(event.getPlayer().getUniqueId())) {
@@ -131,8 +137,15 @@ public class ArrestListener implements Listener {
     @EventHandler
     public void onCommand(PlayerCommandPreprocessEvent event) {
         if (arrestManager.isArrested(event.getPlayer().getUniqueId())) {
-            String cmd = event.getMessage().toLowerCase();
-            if (!cmd.startsWith("/c ") && !cmd.startsWith("/contract")) {
+            String message = event.getMessage().toLowerCase();
+            String cmd = message.split(" ")[0];
+
+            // РЕШЕНИЕ БАГА: Блокируем только ТП-команды, сохраняя работоспособность /login, /register, /msg
+            List<String> blockedCommands = Arrays.asList(
+                    "/spawn", "/home", "/tp", "/warp", "/tpa", "/call", "/pay", "/rtp", "/sethome"
+            );
+
+            if (blockedCommands.contains(cmd)) {
                 event.setCancelled(true);
                 event.getPlayer().sendMessage("§cВ кандалах запрещено использовать телепортационные команды!");
             }

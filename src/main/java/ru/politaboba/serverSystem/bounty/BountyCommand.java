@@ -7,6 +7,7 @@ import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.inventory.meta.SkullMeta;
@@ -19,6 +20,11 @@ import java.util.UUID;
 public class BountyCommand implements CommandExecutor {
 
     private final ServerSystem plugin;
+
+    // Холдер-маркер для защиты GUI
+    public static class BountyBoardHolder implements InventoryHolder {
+        @Override public Inventory getInventory() { return null; }
+    }
 
     public BountyCommand(ServerSystem plugin) {
         this.plugin = plugin;
@@ -33,13 +39,7 @@ public class BountyCommand implements CommandExecutor {
 
         Player player = (Player) sender;
 
-        // Если введена просто команда /bounty — открываем меню доски
-        if (args.length == 0) {
-            openBountyBoard(player);
-            return true;
-        }
-
-        if (args[0].equalsIgnoreCase("board")) {
+        if (args.length == 0 || args[0].equalsIgnoreCase("board")) {
             openBountyBoard(player);
             return true;
         }
@@ -66,16 +66,13 @@ public class BountyCommand implements CommandExecutor {
                 return true;
             }
 
-            // Проверяем, есть ли у игрока нужное количество алмазов
             if (!hasEnoughDiamonds(player, amount)) {
                 player.sendMessage("§cУ вас нет столько алмазов в инвентаре!");
                 return true;
             }
 
-            // Забираем алмазы
             removeDiamonds(player, amount);
 
-            // Создаем заказ
             BountyOrder order = new BountyOrder(target.getName(), targetUUID, player.getName(), amount);
             plugin.getBountyOrders().put(targetUUID, order);
 
@@ -87,9 +84,8 @@ public class BountyCommand implements CommandExecutor {
     }
 
     private void openBountyBoard(Player player) {
-        Inventory gui = Bukkit.createInventory(null, 45, "§0Доска Заказов");
+        Inventory gui = Bukkit.createInventory(new BountyBoardHolder(), 45, "§0Доска Заказов");
 
-        // Кнопка-инструкция
         ItemStack info = new ItemStack(Material.OAK_SIGN);
         ItemMeta infoMeta = info.getItemMeta();
         infoMeta.setDisplayName("§e§lБыстрое создание заказа");
@@ -102,7 +98,6 @@ public class BountyCommand implements CommandExecutor {
         info.setItemMeta(infoMeta);
         gui.setItem(4, info);
 
-        // Кнопка сдачи контракта
         ItemStack claim = new ItemStack(Material.CHEST);
         ItemMeta claimMeta = claim.getItemMeta();
         claimMeta.setDisplayName("§aСдать контракт");
@@ -113,22 +108,23 @@ public class BountyCommand implements CommandExecutor {
         claim.setItemMeta(claimMeta);
         gui.setItem(40, claim);
 
-        // Выводим головы жертв
         int slot = 9;
         for (BountyOrder order : plugin.getBountyOrders().values()) {
-            if (slot >= 36) break; // Ограничение инвентаря
+            if (slot >= 36) break;
 
             ItemStack playerHead = new ItemStack(Material.PLAYER_HEAD);
             SkullMeta headMeta = (SkullMeta) playerHead.getItemMeta();
 
-            headMeta.setOwningPlayer(Bukkit.getOfflinePlayer(order.getTargetUUID()));
-            headMeta.setDisplayName("§cЦель: §l" + order.getTargetName());
+            if (headMeta != null) {
+                headMeta.setOwningPlayer(Bukkit.getOfflinePlayer(order.getTargetUUID()));
+                headMeta.setDisplayName("§cЦель: §l" + order.getTargetName());
 
-            List<String> lore = new ArrayList<>();
-            lore.add("§7Награда: §b" + order.getRewardAmount() + " Алмазов");
-            lore.add("§7Заказчик: §e" + order.getCreatorName());
-            headMeta.setLore(lore);
-            playerHead.setItemMeta(headMeta);
+                List<String> lore = new ArrayList<>();
+                lore.add("§7Награда: §b" + order.getRewardAmount() + " Алмазов");
+                lore.add("§7Заказчик: §e" + order.getCreatorName());
+                headMeta.setLore(lore);
+                playerHead.setItemMeta(headMeta);
+            }
 
             gui.setItem(slot, playerHead);
             slot++;

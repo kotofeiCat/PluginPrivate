@@ -25,21 +25,17 @@ public class BountyTabCompleter implements TabCompleter {
 
         List<String> completions = new ArrayList<>();
 
-        // 1. Первый аргумент: /bounty [target/board]
         if (args.length == 1) {
             List<String> subCommands = Arrays.asList("target", "board");
             return filter(subCommands, args[0]);
         }
 
-        // 2. Второй аргумент: /bounty target [НикИгрока]
         if (args.length == 2) {
             if (args[0].equalsIgnoreCase("target")) {
-                // Возвращаем null, чтобы Spigot автоматически подставил ники игроков онлайн
                 return null;
             }
         }
 
-        // 3. Третий аргумент: /bounty target <ник> [Рекомендуемая сумма алмазов]
         if (args.length == 3) {
             if (args[0].equalsIgnoreCase("target")) {
                 List<String> suggestions = Arrays.asList("5", "10", "16", "32", "64");
@@ -50,7 +46,6 @@ public class BountyTabCompleter implements TabCompleter {
         return completions;
     }
 
-    // Утилитарный метод для фильтрации подсказок на лету
     private List<String> filter(List<String> list, String latestArg) {
         String lower = latestArg.toLowerCase();
         return list.stream()

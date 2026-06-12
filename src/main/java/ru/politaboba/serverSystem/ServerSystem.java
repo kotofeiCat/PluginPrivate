@@ -15,6 +15,10 @@ import ru.politaboba.serverSystem.bounty.BountyCommand;
 import ru.politaboba.serverSystem.bounty.BountyListener;
 import ru.politaboba.serverSystem.bounty.BountyOrder;
 import ru.politaboba.serverSystem.bounty.BountyTabCompleter;
+import ru.politaboba.serverSystem.cases.CaseCommand;
+import ru.politaboba.serverSystem.cases.CaseListener;
+import ru.politaboba.serverSystem.cases.CaseManager;
+import ru.politaboba.serverSystem.cases.CaseTabCompleter;
 import ru.politaboba.serverSystem.contract.Agreement;
 import ru.politaboba.serverSystem.contract.ContractCommand;
 import ru.politaboba.serverSystem.contract.ContractListener;
@@ -32,10 +36,11 @@ import ru.politaboba.serverSystem.item.combat.SmokeBombListener;
 import ru.politaboba.serverSystem.item.brewing.BarrelAgingListener;
 import ru.politaboba.serverSystem.item.brewing.BrewingCauldronListener;
 import ru.politaboba.serverSystem.item.brewing.BrewingStorageListener;
-import ru.politaboba.serverSystem.item.combat.MercenaryArmorListener;
-import ru.politaboba.serverSystem.item.cooking.CampfireCookingListener;
-import ru.politaboba.serverSystem.item.food.FoodEatListener;
-import ru.politaboba.serverSystem.item.food.FoodFactory;
+import ru.politaboba.serverSystem.item.equipment.listener.*;
+import ru.politaboba.serverSystem.item.food.listener.CampfireCookingListener;
+import ru.politaboba.serverSystem.item.food.listener.FoodEatListener;
+import ru.politaboba.serverSystem.item.food.FoodManager;
+import ru.politaboba.serverSystem.item.equipment.EquipmentManager;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -50,12 +55,36 @@ public final class ServerSystem extends JavaPlugin {
     private final List<Agreement> agreements = new ArrayList<>();
     private Scoreboard scoreboard;
 
+    private DungeonManager dungeonManager;
     private FactionDataManager factionDataManager;
+    private FoodManager foodManager;
+    private EquipmentManager equipmentManager;
+    private ChatManager chatManager; // ИСПРАВЛЕНО: Вынесено в поле класса
     private Connection connection;
+    private CaseManager caseManager;
 
     public FactionDataManager getFactionDataManager() {
         return factionDataManager;
     }
+
+    public DungeonManager getDungeonManager() {
+        return dungeonManager;
+    }
+
+    public FoodManager getFoodManager() {
+        return foodManager;
+    }
+
+    public EquipmentManager getEquipmentManager() {
+        return equipmentManager;
+    }
+
+    // ИСПРАВЛЕНО: Геттер чат-менеджера для команды /f chat
+    public ChatManager getChatManager() {
+        return chatManager;
+    }
+
+    public CaseManager getCaseManager() { return caseManager; }
 
     /**
      * Возвращает активное подключение к базе данных.
@@ -74,60 +103,70 @@ public final class ServerSystem extends JavaPlugin {
 
     @Override
     public void onEnable() {
-
-        // Регистрация листенера артефакта (уже было у тебя)
-        getServer().getPluginManager().registerEvents(new ItemArtifactListener(), this);
-
-        // ==================== МОДУЛЬ КАСТОМНОГО ДАНЖА ====================
-
-        // 1. Инициализируем механику кастомного босса
-        ArchVindicatorBoss bossMechanics = new ArchVindicatorBoss(this);
-
-        // 2. Инициализируем менеджер сессий данжей (управляет NBT-структурами и логикой)
-        DungeonManager dungeonManager = new DungeonManager(this, bossMechanics);
-
-        // 3. Регистрируем обновленную команду ручного спавна замка для админов
-        if (this.getCommand("generatecastle") != null) {
-            this.getCommand("generatecastle").setExecutor(new TestCastleCommand(dungeonManager));
-        }
-
-        // 4. Регистрируем главный игровой листенер данжа (кнопки старта, ключи, волны мобов)
-        DungeonListener dungeonListener = new DungeonListener(this, dungeonManager);
-        getServer().getPluginManager().registerEvents(dungeonListener, this);
-
-        // 5. Инициализируем и регистрируем палочку-инструмент разработчика (Dev Tool)
-        DungeonDevTool devTool = new DungeonDevTool();
-        getServer().getPluginManager().registerEvents(devTool, this); // Регистрируем как листенер кликов
-
-        if (this.getCommand("dungeonorigin") != null) {
-            this.getCommand("dungeonorigin").setExecutor(devTool); // Регистрируем команду установки точки отсчета
-        }
-
-        if (this.getCommand("dungeon") != null) {
-            this.getCommand("dungeon").setExecutor(new DungeonPlayerCommand(dungeonManager));
-        }
-
-        //--------------------------
-
-        // Создаем config.yml с дефолтными настройками, если его не было
         saveDefaultConfig();
 
-        // 1. Инициализируем подключение к базе данных хостинга
+        // 1. База данных
         initDatabase();
 
-        // 2. Инициализируем менеджер данных и загружаем фракции/контракты/розыски прямо из БД
+        getServer().getPluginManager().registerEvents(new ItemArtifactListener(), this);
+
+        // ==================== МОДУЛЬ ДОНАТ-КЕЙСОВ ====================
+        this.caseManager = new CaseManager(this);
+        getServer().getPluginManager().registerEvents(new CaseListener(this.caseManager), this);
+
+        if (getCommand("case") != null) {
+            getCommand("case").setExecutor(new CaseCommand(this.caseManager));
+            getCommand("case").setTabCompleter(new CaseTabCompleter());
+        }
+
+        // ==================== МОДУЛЬ КУЛИНАРИИ (ООП) ====================
+        this.foodManager = new FoodManager(this);
+        this.foodManager.registerAllCooking();
+
+        // ==================== МОДУЛЬ СНАРЯЖЕНИЯ И ОРУЖИЯ (ООП) ====================
+        this.equipmentManager = new EquipmentManager(this);
+        this.equipmentManager.registerAllRecipes();
+
+        // Добавляем регистрацию нашей новой команды выдачи предметов:
+        if (getCommand("rpgive") != null) {
+            ru.politaboba.serverSystem.item.equipment.command.EquipmentGiveCommand giveCommand =
+                    new ru.politaboba.serverSystem.item.equipment.command.EquipmentGiveCommand(this);
+            getCommand("rpgive").setExecutor(giveCommand);
+            getCommand("rpgive").setTabCompleter(giveCommand);
+        }
+
+        // ==================== МОДУЛЬ КАСТОМНОГО ДАНЖА ====================
+        ArchVindicatorBoss bossMechanics = new ArchVindicatorBoss(this);
+        this.dungeonManager = new DungeonManager(this, bossMechanics);
+
+        if (this.getCommand("generatecastle") != null) {
+            this.getCommand("generatecastle").setExecutor(new TestCastleCommand(this.dungeonManager));
+        }
+
+        DungeonListener dungeonListener = new DungeonListener(this, this.dungeonManager);
+        getServer().getPluginManager().registerEvents(dungeonListener, this);
+
+        DungeonDevTool devTool = new DungeonDevTool();
+        getServer().getPluginManager().registerEvents(devTool, this);
+
+        if (this.getCommand("dungeonorigin") != null) {
+            this.getCommand("dungeonorigin").setExecutor(devTool);
+        }
+        if (this.getCommand("dungeon") != null) {
+            this.getCommand("dungeon").setExecutor(new DungeonPlayerCommand(this.dungeonManager));
+        }
+
+        // ==================== МОДУЛЬ ФРАКЦИЙ И ЭКОНОМИКИ ====================
         this.factionDataManager = new FactionDataManager(this);
         this.factionDataManager.loadAll();
 
-        // 3. Запускаем СИНХРОННЫЙ таймер автосохранения.
-        // Он безопасно берет снимки измененных фракций в главном потоке и отправляет SQL запросы в асинхрон
         Bukkit.getScheduler().runTaskTimer(this, () -> {
             if (this.factionDataManager != null) {
                 this.factionDataManager.saveAll();
             }
-        }, 12000L, 12000L); // Раз в 10 минут (12000 тиков)
+        }, 12000L, 12000L);
 
-        // Инициализация модуля арестов (Кандалы)
+        // Модуль арестов (Кандалы)
         ru.politaboba.serverSystem.arrest.ArrestManager arrestManager = new ru.politaboba.serverSystem.arrest.ArrestManager(this);
         getServer().getPluginManager().registerEvents(new ru.politaboba.serverSystem.arrest.ArrestListener(arrestManager, this), this);
 
@@ -135,34 +174,33 @@ public final class ServerSystem extends JavaPlugin {
             getCommand("handcuffs").setExecutor(new ru.politaboba.serverSystem.arrest.ArrestCommand());
         }
 
-        // Инициализация чат-менеджера и глобальных команд общения
-        ChatManager chatManager = new ChatManager();
-        getServer().getPluginManager().registerEvents(new FactionChatListener(this, chatManager), this);
+        // ==================== МОДУЛЬ ЧАТА И ОБЩЕНИЯ ====================
+        // ИСПРАВЛЕНО: Корректная инициализация глобального менеджера чатов
+        this.chatManager = new ChatManager();
+        getServer().getPluginManager().registerEvents(new FactionChatListener(this, this.chatManager), this);
 
-        GlobalChatCommand chatCommand = new GlobalChatCommand(this, chatManager);
+        GlobalChatCommand chatCommand = new GlobalChatCommand(this, this.chatManager);
         if (getCommand("g") != null) getCommand("g").setExecutor(chatCommand);
         if (getCommand("msg") != null) getCommand("msg").setExecutor(chatCommand);
 
         this.scoreboard = Bukkit.getScoreboardManager().getMainScoreboard();
 
-        // Регистрируем команду /f и автотабкомплитер
         if (getCommand("faction") != null) {
             FactionCommand factionCommand = new FactionCommand(this);
             getCommand("faction").setExecutor(factionCommand);
             getCommand("faction").setTabCompleter(new FactionTabCompleter(this));
         }
 
-        // Обработчик событий фракций (GUI, обновление ников при входе)
         getServer().getPluginManager().registerEvents(new FactionListener(this), this);
 
-        // Система охоты за головами (Bounty)
+        // Охота за головами
         if (getCommand("bounty") != null) {
             getCommand("bounty").setExecutor(new BountyCommand(this));
             getCommand("bounty").setTabCompleter(new BountyTabCompleter(this));
         }
         getServer().getPluginManager().registerEvents(new BountyListener(this), this);
 
-        // Система нотариальных контрактов
+        // Контракты
         ContractCommand contractCommand = new ContractCommand(this);
         if (getCommand("contract") != null) {
             getCommand("contract").setExecutor(contractCommand);
@@ -170,26 +208,27 @@ public final class ServerSystem extends JavaPlugin {
         }
         getServer().getPluginManager().registerEvents(new ContractListener(this, contractCommand), this);
 
-        // Обработчики событий кастомных предметов
+        // ==================== РЕГИСТРАЦИЯ СЛУШАТЕЛЕЙ ПРЕДМЕТОВ ====================
         getServer().getPluginManager().registerEvents(new SmokeBombListener(this), this);
         getServer().getPluginManager().registerEvents(new FoodEatListener(this), this);
         getServer().getPluginManager().registerEvents(new CampfireCookingListener(this), this);
         getServer().getPluginManager().registerEvents(new BrewingStorageListener(this), this);
         getServer().getPluginManager().registerEvents(new BrewingCauldronListener(this), this);
         getServer().getPluginManager().registerEvents(new BarrelAgingListener(this), this);
-        getServer().getPluginManager().registerEvents(new MercenaryArmorListener(this), this);
 
-        // Регистрация кастомных кулинарных рецептов
-        FoodFactory foodFactory = new FoodFactory(this);
-        foodFactory.registerAllCooking();
+        // Слушатели модулей кастомного снаряжения
+        getServer().getPluginManager().registerEvents(new EquipmentSmithingListener(this), this);
+        getServer().getPluginManager().registerEvents(new MercenaryArmorListener(this), this); // ИСПРАВЛЕНО: Новый геймплейный класс
+        getServer().getPluginManager().registerEvents(new WindCatcherArmorListener(this), this);
+        getServer().getPluginManager().registerEvents(new ZephyrSpearListener(this), this);
+        getServer().getPluginManager().registerEvents(new CastleBreakerAxeListener(this), this);
+        getServer().getPluginManager().registerEvents(new MagneticWeaponListener(this), this);
+        getServer().getPluginManager().registerEvents(new StormBowListener(this), this);
 
-        // Регистрация рецептов верстака
+        // Оставшиеся системные рецепты верстака (не являющиеся оружием/шаблонами)
         registerHandcuffsRecipe();
         registerSmokeBombRecipe();
-        registerHalberdRecipe();
-        registerMercenaryTemplateRecipe();
 
-        // Регистрация автодополнения для личных сообщений
         if (getCommand("msg") != null) {
             getCommand("msg").setTabCompleter(new MsgTabCompleter(this));
         }
@@ -199,28 +238,25 @@ public final class ServerSystem extends JavaPlugin {
 
         getLogger().info("=======================================");
         getLogger().info(" [ServerSystem] Все RP модули успешно запущены!");
-        getLogger().info(" [ServerSystem] Режим хранения: MySQL");
+        getLogger().info(" [ServerSystem] Режим хранения: MySQL/SQLite");
         getLogger().info("=======================================");
     }
 
     @Override
     public void onDisable() {
-        // Принудительное СИНХРОННОЕ сохранение всех данных в БД перед полной остановкой сервера
         if (this.factionDataManager != null) {
             this.factionDataManager.saveAllSynchronously();
         }
 
-        // Закрываем пул соединения с базой данных
         try {
             if (connection != null && !connection.isClosed()) {
                 connection.close();
-                getLogger().info("[ServerSystem] Соединение с MySQL успешно закрыто.");
+                getLogger().info("[ServerSystem] Соединение с базой данных успешно закрыто.");
             }
         } catch (SQLException e) {
             e.printStackTrace();
         }
 
-        // Очищаем команды из скорборда, чтобы избежать багов при перезагрузке плагина
         for (String factionName : factions.keySet()) {
             Team team = scoreboard.getTeam(factionName);
             if (team != null) team.unregister();
@@ -232,10 +268,7 @@ public final class ServerSystem extends JavaPlugin {
 
     private void initDatabase() {
         try {
-            // Загружаем драйвер SQLite (он встроен во все ядра Spigot/Paper по умолчанию)
             Class.forName("org.sqlite.JDBC");
-
-            // Создаем файл базы данных прямо в папке плагина: plugins/ServerSystem/database.db
             java.io.File dataFolder = new java.io.File(getDataFolder(), "database.db");
 
             String url = "jdbc:sqlite:" + dataFolder.getAbsolutePath();
@@ -256,9 +289,6 @@ public final class ServerSystem extends JavaPlugin {
     public Map<UUID, BountyOrder> getBountyOrders() { return bountyOrders; }
     public List<Agreement> getAgreements() { return agreements; }
 
-    /**
-     * Обновление отображения ников (Государство в табе, полная инфа над головой в игре)
-     */
     public void updateAllPlayersDisplay() {
         for (Player onlinePlayer : Bukkit.getOnlinePlayers()) {
             UUID playerUUID = onlinePlayer.getUniqueId();
@@ -271,7 +301,6 @@ public final class ServerSystem extends JavaPlugin {
                 ChatColor color = faction.getFactionColor();
                 String prefixTag = factionName.substring(0, Math.min(factionName.length(), 4));
 
-                // 1. НАД ГОЛОВОЙ В ИГРЕ
                 String fullRoleString = faction.getPlayerInfoString(playerUUID);
                 String overheadPrefix = ChatColor.DARK_GRAY + "[" + color + prefixTag + ChatColor.DARK_GRAY + "] "
                         + ChatColor.RESET + fullRoleString + ChatColor.RESET + " ";
@@ -282,11 +311,9 @@ public final class ServerSystem extends JavaPlugin {
                 team.setPrefix(overheadPrefix);
                 team.addEntry(onlinePlayer.getName());
 
-                // 2. В ТАБ-ЛИСТЕ
                 String tabName = ChatColor.DARK_GRAY + "[" + color + prefixTag + ChatColor.DARK_GRAY + "] " + color + onlinePlayer.getName();
                 onlinePlayer.setPlayerListName(tabName);
 
-                // 3. СИСТЕМА ЧЕРНОГО СПИСКА (Враги государства)
                 Team enemyTeam = scoreboard.getTeam(factionName + "_enemies");
                 if (enemyTeam == null) {
                     enemyTeam = scoreboard.registerNewTeam(factionName + "_enemies");
@@ -334,54 +361,6 @@ public final class ServerSystem extends JavaPlugin {
         recipe.addIngredient(Material.COAL);
         recipe.addIngredient(Material.FIREWORK_ROCKET);
         recipe.addIngredient(Material.IRON_NUGGET);
-
-        Bukkit.addRecipe(recipe);
-    }
-
-    private void registerHalberdRecipe() {
-        ru.politaboba.serverSystem.item.ItemFactory factory = new ru.politaboba.serverSystem.item.ItemFactory(this);
-        ItemStack halberd = factory.createHalberd();
-        NamespacedKey key = new NamespacedKey(this, "rp_halberd");
-        org.bukkit.inventory.ShapedRecipe recipe = new org.bukkit.inventory.ShapedRecipe(key, halberd);
-
-        recipe.shape("DBD", " S ", " S ");
-        recipe.setIngredient('D', Material.DIAMOND);
-        recipe.setIngredient('B', Material.DIAMOND_BLOCK);
-        recipe.setIngredient('S', Material.BREEZE_ROD);
-
-        Bukkit.addRecipe(recipe);
-    }
-
-    private void registerMercenaryTemplateRecipe() {
-        ItemStack template = new ItemStack(Material.NETHERITE_UPGRADE_SMITHING_TEMPLATE);
-        org.bukkit.inventory.meta.ItemMeta meta = template.getItemMeta();
-        if (meta != null) {
-            meta.setDisplayName("§4§lКузнечный Шаблон: Улучшение Наёмника");
-            List<String> lore = new ArrayList<>();
-            lore.add("§7Позволяет модифицировать броню под нужды наёмников.");
-            lore.add("");
-            lore.add("§eПрименимо в кузнечном столе:");
-            lore.add(" §7• Объедините с элементом брони");
-            lore.add(" §7• Требуется: §b1 Алмаз§7 в качестве материала");
-            lore.add("");
-            lore.add("§c§lПолный сет экипировки наёмника даёт:");
-            lore.add(" §e• §aСкорость II (+20% к бегу)");
-            lore.add(" §e• §aВыносливость (+3 доп. сердца)");
-            lore.add(" §e• §aБоевая регенерация (Регенерация I)");
-            meta.setLore(lore);
-
-            NamespacedKey key = new NamespacedKey(this, "mercenary_template");
-            meta.getPersistentDataContainer().set(key, org.bukkit.persistence.PersistentDataType.BYTE, (byte) 1);
-            template.setItemMeta(meta);
-        }
-
-        NamespacedKey recipeKey = new NamespacedKey(this, "mercenary_template_craft");
-        org.bukkit.inventory.ShapedRecipe recipe = new org.bukkit.inventory.ShapedRecipe(recipeKey, template);
-
-        recipe.shape("LTL", "LNL", "LLL");
-        recipe.setIngredient('L', Material.LEATHER);
-        recipe.setIngredient('T', Material.NETHERITE_UPGRADE_SMITHING_TEMPLATE);
-        recipe.setIngredient('N', Material.NETHERITE_INGOT);
 
         Bukkit.addRecipe(recipe);
     }
