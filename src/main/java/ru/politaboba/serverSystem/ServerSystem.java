@@ -108,7 +108,6 @@ public final class ServerSystem extends JavaPlugin {
         // 1. База данных
         initDatabase();
 
-        getServer().getPluginManager().registerEvents(new ItemArtifactListener(), this);
 
         // ==================== МОДУЛЬ ДОНАТ-КЕЙСОВ ====================
         this.caseManager = new CaseManager(this);
